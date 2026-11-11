@@ -173,9 +173,17 @@ def _approvals_step(ctx: JobContext, as_of: dt.date, session: Session) -> StepOu
     return StepOutcome(rows=n)
 
 
+def _creative_step(ctx: JobContext, as_of: dt.date, session: Session) -> StepOutcome:
+    """Phase 4 (LLM agent): fatigue → ``new_ad`` drafts (approval required, PAUSED)."""
+    from engine.llm.steps import creative_step
+
+    return creative_step(ctx, as_of, session)
+
+
 WEEKLY_STEPS = (
     ("allocation", _allocation_step),
     ("rule_review", _rule_review_step),
+    ("creative", _creative_step),
     ("guardrail", _guardrail_step),
     ("approvals", _approvals_step),
 )

@@ -65,6 +65,16 @@ def register_step(name: str, fn: StepFn) -> None:
     _HANDLERS[name] = fn
 
 
+def _register_phase4() -> None:
+    """Phase 4 (LLM agent): step 7 ``triage``. Imported late: engine.llm imports job helpers."""
+    from engine.llm.steps import triage_step
+
+    register_step("triage", triage_step)
+
+
+_register_phase4()
+
+
 def daily_pipeline(ctx: JobContext) -> list[StepResult]:
     as_of = client_yesterday(ctx.now(), ctx.settings.timezone)
     window = as_of.isoformat()
