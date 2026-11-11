@@ -2404,8 +2404,31 @@
             "title": "Days",
             "type": "array"
           },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "why the LLM is off (null when enabled)",
+            "title": "Disabled Reason"
+          },
+          "large_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Model"
+          },
           "llm_enabled": {
-            "description": "false until the LLM layer ships (Phase 4)",
+            "description": "engine.llm.status: true only when LLM_PROVIDER, key, models and prices are set",
             "title": "Llm Enabled",
             "type": "boolean"
           },
@@ -2416,9 +2439,31 @@
             "title": "Monthly Cost Cap Usd",
             "type": "string"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "range_days": {
             "title": "Range Days",
             "type": "integer"
+          },
+          "small_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Small Model"
           },
           "today": {
             "$ref": "#/components/schemas/LLMUsageTotals"
@@ -3291,6 +3336,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM triage result for escalations"
           }
         },
         "required": [
@@ -4559,6 +4615,112 @@
           "spend_by_platform"
         ],
         "title": "TrendPoint",
+        "type": "object"
+      },
+      "TriageOut": {
+        "description": "Outcome of LLM triage on an escalation (``params.triage``, Phase 4, D-21).",
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "llm_call_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Call Id"
+          },
+          "outcome": {
+            "description": "proposal | noop | flag_human",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "proposal_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "proposal created from this escalation",
+            "title": "Proposal Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "model's reason (untrusted text, display only)",
+            "title": "Reason"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "TriageOut",
         "type": "object"
       },
       "ValidationError": {

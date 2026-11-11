@@ -458,6 +458,20 @@ class GuardrailResultOut(_Out):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
+class TriageOut(_Out):
+    """Outcome of LLM triage on an escalation (``params.triage``, Phase 4, D-21)."""
+
+    outcome: str = Field(description="proposal | noop | flag_human")
+    action: str | None = None
+    confidence: float | None = None
+    tier: str | None = None
+    reason: str | None = Field(None, description="model's reason (untrusted text, display only)")
+    cause: str | None = None
+    llm_call_id: int | None = None
+    proposal_id: int | None = Field(None, description="proposal created from this escalation")
+    at: dt.datetime | None = None
+
+
 class ProposalOut(EntityRef):
     id: int
     dedupe_key: str
@@ -478,6 +492,7 @@ class ProposalOut(EntityRef):
     created_at: dt.datetime
     approval: ApprovalOut | None = None
     change: ValueChange | None = None
+    triage: TriageOut | None = Field(None, description="LLM triage result for escalations")
 
 
 class ApproveRequest(_In):
@@ -632,7 +647,13 @@ class LLMUsageResponse(_Out):
     daily_token_cap: int
     daily_cost_cap_usd: Decimal
     monthly_cost_cap_usd: Decimal
-    llm_enabled: bool = Field(description="false until the LLM layer ships (Phase 4)")
+    llm_enabled: bool = Field(
+        description="engine.llm.status: true only when LLM_PROVIDER, key, models and prices are set"
+    )
+    provider: str | None = None
+    disabled_reason: str | None = Field(None, description="why the LLM is off (null when enabled)")
+    small_model: str | None = None
+    large_model: str | None = None
 
 
 # --------------------------------------------------------------------------- alerts etc.

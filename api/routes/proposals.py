@@ -28,7 +28,7 @@ from api.schemas import (
     RejectRequest,
 )
 from api.services import approvals
-from api.services.entities import parse_guardrail, proposal_change, resolve
+from api.services.entities import parse_guardrail, parse_triage, proposal_change, resolve
 from api.services.queries import audit
 from engine.db.models import Ad, AdGroup, Campaign, Keyword, Proposal
 from engine.enums import Action, EntityType, ProposalSource, ProposalStatus
@@ -71,6 +71,7 @@ def _outs(db: Session, rows: Sequence[Proposal]) -> list[ProposalOut]:
                     "campaign_id": info.campaign_id if info else None,
                     "campaign_name": info.campaign_name if info else None,
                     "change": proposal_change(p.action, p.params, p.expected_impact, gr, info),
+                    "triage": parse_triage(p.params),
                 }
             )
         )

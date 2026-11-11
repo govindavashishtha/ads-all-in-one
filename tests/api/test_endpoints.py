@@ -323,6 +323,41 @@ def test_proposal_typed_guardrail_result(
     )
 
 
+def test_proposal_triage_outcome(
+    client: TestClient, viewer_h: H, world: World, seeded: Session
+) -> None:
+    """Escalations keep status 'escalated'; params.triage (engine.llm.steps) is typed."""
+    p = seeded.get(Proposal, world.proposal_pending)
+    assert p is not None
+    p.status = "escalated"
+    p.params = {
+        **(p.params or {}),
+        "triage": {
+            "outcome": "proposal",
+            "proposal_id": world.proposal_waiting,
+            "action": "budget_change",
+            "confidence": 0.82,
+            "tier": "triage",
+            "llm_call_id": 7,
+            "cache_hit": None,
+            "reason": "CPA well under target",
+            "at": "2026-11-11T01:00:00+00:00",
+        },
+    }
+    seeded.flush()
+    t = client.get(f"{V1}/proposals/{world.proposal_pending}", headers=viewer_h).json()["triage"]
+    assert (t["outcome"], t["proposal_id"], t["confidence"], t["llm_call_id"]) == (
+        "proposal",
+        world.proposal_waiting,
+        0.82,
+        7,
+    )
+    rows = client.get(f"{V1}/proposals?status=escalated", headers=viewer_h).json()
+    assert [r["id"] for r in rows] == [world.proposal_pending]
+    other = client.get(f"{V1}/proposals/{world.proposal_waiting}", headers=viewer_h).json()
+    assert other["triage"] is None
+
+
 def test_approve_and_reject(
     client: TestClient, approver_h: H, world: World, seeded: Session
 ) -> None:
@@ -531,9 +566,24 @@ def test_llm_usage(client: TestClient, viewer_h: H, world: World) -> None:
     assert set(d["by_purpose"]) == {"triage", "analyst"}
     assert [x["date"] for x in d["days"]] == ["2026-11-08", "2026-11-11"]
     assert d["llm_enabled"] is False and d["daily_token_cap"] == 100000
+    assert d["disabled_reason"] and "LLM_PROVIDER" in d["disabled_reason"]
     d1 = client.get(f"{V1}/llm/usage?range=1d", headers=viewer_h).json()
     assert [x["tier"] for x in d1["days"]] == ["small"]
     assert Decimal(d1["month_to_date"]["cost_usd"]) == Decimal("0.0512")  # MTD ignores range
+
+
+def test_llm_usage_reports_engine_status(
+    seeded: Session, api_settings_factory: Callable[..., Settings], clock: Clock
+) -> None:
+    """``llm_enabled`` comes from engine.llm.status (same decision the engine makes)."""
+    on = api_settings_factory(llm_provider="fake", app_env="development")
+    with TestClient(build_app(seeded, on, clock), base_url=BASE) as c:
+        d = c.get(f"{V1}/llm/usage", headers=bearer(c)).json()
+        assert d["llm_enabled"] is True and d["disabled_reason"] is None
+    off = api_settings_factory(llm_provider="fake", app_env="production")
+    with TestClient(build_app(seeded, off, clock), base_url=BASE) as c:
+        d = c.get(f"{V1}/llm/usage", headers=bearer(c)).json()
+        assert d["llm_enabled"] is False and "development" in d["disabled_reason"]
 
 
 def test_alerts(

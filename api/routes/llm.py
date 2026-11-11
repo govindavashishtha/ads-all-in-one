@@ -14,6 +14,7 @@ from api.deps import ClockDep, DbDep, SettingsDep, load_client
 from api.schemas import LLMUsageDay, LLMUsageResponse, LLMUsageTotals
 from api.timeutil import parse_days
 from engine.db.models import LLMCall
+from engine.llm.status import llm_status
 
 router = APIRouter(tags=["llm"])
 
@@ -69,6 +70,7 @@ def llm_usage(
         ).all()
     ]
     window_start = today - dt.timedelta(days=days - 1)
+    status = llm_status(settings)  # same decision the engine makes (never raises)
     by_purpose: dict[str, LLMUsageTotals] = {}
     for purpose, n, i, c, o, cost in db.execute(
         select(LLMCall.purpose, *sums)
@@ -91,5 +93,9 @@ def llm_usage(
         daily_token_cap=settings.llm_daily_token_cap,
         daily_cost_cap_usd=settings.llm_daily_cost_cap_usd,
         monthly_cost_cap_usd=settings.llm_monthly_cost_cap_usd,
-        llm_enabled=False,
+        llm_enabled=bool(status["llm_enabled"]),
+        provider=status["provider"],
+        disabled_reason=status["disabled_reason"],
+        small_model=status["small_model"],
+        large_model=status["large_model"],
     )

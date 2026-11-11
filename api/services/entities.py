@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.schemas import GuardrailResultOut, ValueChange
+from api.schemas import GuardrailResultOut, TriageOut, ValueChange
 from engine.db.models import Ad, AdGroup, Campaign, Keyword, SearchTerm
 from engine.enums import Action, EntityType, Platform
 
@@ -167,6 +167,17 @@ def parse_guardrail(raw: dict[str, Any] | None) -> GuardrailResultOut | None:
         return None
     try:
         return GuardrailResultOut.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def parse_triage(params: dict[str, Any] | None) -> TriageOut | None:
+    """``params.triage`` written by engine.llm.steps → typed; unparseable → None."""
+    raw = (params or {}).get("triage")
+    if not isinstance(raw, dict) or not raw.get("outcome"):
+        return None
+    try:
+        return TriageOut.model_validate(raw)
     except ValidationError:
         return None
 
