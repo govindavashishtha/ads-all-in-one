@@ -1,0 +1,103 @@
+# Seed for config_versions(kind='rules') — loaded ONCE by engine/bootstrap.py (§7.1).
+# After first start the DB is the source of truth; change rules via PUT /api/v1/rules.
+#
+# Values marked "# INPUT I-x" are the plan's EXAMPLE values, NOT real business inputs.
+# Replace them with Govinda's answers (BUILD_PLAN §25) and then set inputs_confirmed: true.
+# Bootstrap refuses to seed unconfirmed placeholders unless APP_ENV=development.
+version: 1
+inputs_confirmed: false            # INPUT I-1, I-2, I-4: set true only after real values are in
+
+targets:
+  currency: INR                    # INPUT I-2
+  objective: conversions           # INPUT I-1: conversions | value | traffic
+  target_cpa: 500                  # INPUT I-1
+  target_roas: 3.0                 # INPUT I-1 (used only when objective = value)
+  meta_conversion_action: ""       # INPUT I-1, exact Meta action_type string
+
+stats:
+  score_window_days: 14      # scoring uses this many account days
+  settle_days: 2             # ...ending this many days before today (conversions still arriving are excluded)
+  prior_window_days: 28
+  ctr_prior_impressions: 2000
+  theta_prior_spend_x_cpa: 1.0   # prior weight = this many target CPAs of spend
+  aov_prior_conversions: 5
+  min_parent_spend_x_cpa: 3.0    # below this, fall back to the account-level prior
+  mc_draws: 10000
+
+rules:
+  - key: hold_low_data
+    priority: 100
+    applies_to: [ad, ad_group, keyword, campaign]
+    when: "not data_sufficient"
+    action: noop
+
+  - key: hold_learning
+    priority: 110
+    applies_to: [ad_group, campaign]
+    when: "learning"
+    action: noop
+
+  - key: cpa_spike_anomaly
+    priority: 200
+    applies_to: [ad_group, campaign]
+    when: "(conversions_1d == 0 and spend_1d >= 3 * target_cpa) or (conversions_1d > 0 and spend_1d >= target_cpa and cpa_1d > 2.0 * cpa_28d)"
+    action: escalate
+    reason: anomaly
+
+  - key: ctr_collapse_anomaly
+    priority: 210
+    applies_to: [ad, ad_group]
+    when: "impressions_1d >= 2000 and ctr_1d < 0.5 * ctr_28d"
+    action: escalate
+    reason: anomaly
+
+  - key: pause_clear_loser_ad
+    priority: 300
+    applies_to: [ad]
+    when: "spend_s14 >= 3 * target_cpa and conversions_s14 == 0 and active_ads_in_group > 2"
+    action: pause
+    risk: low
+
+  - key: pause_high_cpa_ad
+    priority: 310
+    applies_to: [ad]
+    when: "p_beats_target < 0.10 and cpa_shrunk > 2.0 * target_cpa and active_ads_in_group > 2"
+    action: pause
+    risk: low
+
+  - key: creative_fatigue
+    priority: 320
+    applies_to: [ad]
+    when: "fatigue_flag"
+    action: escalate
+    reason: fatigue                # weekly job turns this into a creative-refresh proposal (approval required)
+
+  - key: scale_winner
+    priority: 400
+    applies_to: [ad_group, campaign]
+    when: "is_budget_unit and p_beats_target > 0.80 and spend_pace_7d >= 0.90"
+    action: budget_change
+    params: { change_pct: 15 }
+    risk: low
+
+  - key: trim_underperformer
+    priority: 410
+    applies_to: [ad_group, campaign]
+    when: "is_budget_unit and p_beats_target < 0.20"
+    action: budget_change
+    params: { change_pct: -15 }
+    risk: low
+
+  - key: negative_keyword_candidate
+    priority: 420
+    applies_to: [search_term]
+    when: "cost_30d >= 3 * target_cpa and conversions_30d == 0 and clicks_30d >= 20"
+    action: add_negative
+    params: { match_type: exact, level: ad_group }
+    risk: medium
+
+  - key: within_band
+    priority: 900
+    applies_to: [ad, ad_group, keyword, campaign, search_term]
+    when: "True"
+    action: noop

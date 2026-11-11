@@ -1,0 +1,45 @@
+# Seed for config_versions(kind='limits') — loaded ONCE by engine/bootstrap.py (§7.1).
+# After first start the DB is the source of truth; change via PUT /api/v1/limits.
+#
+# Numbers are the plan's EXAMPLES (§12.2), NOT real caps. Real values are INPUT I-2.
+# No cap may exceed the HARD_DAILY_CAP / HARD_MONTHLY_CAP env ceilings (bootstrap enforces).
+version: 1
+inputs_confirmed: false                 # INPUT I-2: set true only after real caps are in
+caps:                                   # major currency units; none may exceed HARD_* ceilings
+  total:  { daily: 20000, monthly: 550000 }   # INPUT I-2
+  meta:   { daily: 12000, monthly: 330000 }   # INPUT I-2
+  google: { daily: 8000,  monthly: 220000 }   # INPUT I-2
+campaign:
+  max_daily_budget: 8000                # INPUT I-2
+  min_daily_budget: 300                 # INPUT I-2
+change:
+  max_budget_change_pct_per_day: 20     # per budget unit, vs its start-of-day budget, either direction
+  min_useful_change_pct: 5
+  auto_max_budget_change_pct: 15
+  auto_max_abs_change: 2000             # INPUT I-2 (currency amount)
+  max_auto_pauses_per_day: 5
+  keep_min_active_ads_per_group: 2
+cooldowns:
+  same_entity_days: 7                   # equals the evaluation horizon, so evaluations are never contaminated
+  after_manual_change_hours: 48
+learning_phase:
+  block_budget_changes: true
+  block_pauses: true
+pacing:
+  min_elapsed_hours: 3
+  warn_spent_fraction: 0.85
+  warn_projected_ratio: 1.10
+  emergency_spent_fraction: 0.97
+  platform_flex: { meta: 1.75, google: 2.0 }
+  emergency_stop_enabled: true
+allocation:
+  share_floor_factor: 0.5
+  share_ceiling: 0.60
+  min_spend_pace: 0.90
+  max_frequency_7d: 3.5
+approval_required_for:
+  - new_campaign
+  - new_ad
+  - enable
+  - add_negative
+  - rollback_with_state_drift
