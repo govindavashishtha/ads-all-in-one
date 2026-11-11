@@ -229,6 +229,8 @@ def build_digest(session: Session, settings: Settings, as_of: dt.date) -> Digest
                 "rule": p.rule_key,
                 "entity": f"{p.entity_type.value} {p.entity_id}",
                 "reason": p.reason,
+                # Phase 4: outcome of LLM triage (proposal / noop / flag_human), see engine.llm
+                "triage": ((p.params or {}).get("triage") or {}).get("outcome") or "pending",
             }
             for p in escalated
         ],
@@ -286,9 +288,9 @@ def render_text(d: dict[str, Any]) -> str:
         out.append(f"  #{a['id']} {a['action']} {a['entity']} (expires {a['expires_at']})")
     if d["escalated"]:
         out.append("")
-        out.append(f"Escalations for human review (LLM triage not enabled): {len(d['escalated'])}")
+        out.append(f"Escalations and their LLM triage outcome: {len(d['escalated'])}")
         for x in d["escalated"]:
-            out.append(f"  #{x['id']} {x['rule']} {x['entity']}")
+            out.append(f"  #{x['id']} {x['rule']} {x['entity']} → {x['triage']}")
     out.append("")
     out.append(f"LLM cost yesterday: ${d['llm_cost_usd']}")
     return "\n".join(out) + "\n"
@@ -379,11 +381,11 @@ def render_html(d: dict[str, Any], subject: str) -> str:
         )
     )
     if d["escalated"]:
-        parts.append("<h3>Escalations for human review (LLM triage not enabled)</h3>")
+        parts.append("<h3>Escalations and their LLM triage outcome</h3>")
         parts.append(
             table(
-                ["id", "rule", "entity"],
-                [[x["id"], x["rule"], x["entity"]] for x in d["escalated"]],
+                ["id", "rule", "entity", "triage"],
+                [[x["id"], x["rule"], x["entity"], x["triage"]] for x in d["escalated"]],
             )
         )
     parts.append(f"<p>LLM cost yesterday: ${escape(d['llm_cost_usd'])}</p>")
