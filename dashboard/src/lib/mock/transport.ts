@@ -126,7 +126,7 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
     if (path === "/changes") return phase < 3 ? [] : d.changes;
     if (path === "/llm/usage") {
       const u = mockLlmUsage(d, q.get("range") ?? "30d");
-      if (phase < 4) return { ...u, llm_enabled: false, days: [], by_purpose: {}, today: {}, month_to_date: {} };
+      if (phase < 4) return { ...u, llm_enabled: false, provider: null, disabled_reason: "LLM_PROVIDER not set (LLM disabled)", small_model: null, large_model: null, days: [], by_purpose: {}, today: {}, month_to_date: {} };
       return u;
     }
   }

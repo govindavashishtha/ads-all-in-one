@@ -1495,15 +1495,26 @@ export interface components {
             /** Days */
             days: components["schemas"]["LLMUsageDay"][];
             /**
+             * Disabled Reason
+             * @description why the LLM is off (null when enabled)
+             */
+            disabled_reason?: string | null;
+            /** Large Model */
+            large_model?: string | null;
+            /**
              * Llm Enabled
-             * @description false until the LLM layer ships (Phase 4)
+             * @description engine.llm.status: true only when LLM_PROVIDER, key, models and prices are set
              */
             llm_enabled: boolean;
             month_to_date: components["schemas"]["LLMUsageTotals"];
             /** Monthly Cost Cap Usd */
             monthly_cost_cap_usd: string;
+            /** Provider */
+            provider?: string | null;
             /** Range Days */
             range_days: number;
+            /** Small Model */
+            small_model?: string | null;
             today: components["schemas"]["LLMUsageTotals"];
         };
         /** LLMUsageTotals */
@@ -1827,6 +1838,8 @@ export interface components {
             spend_direction: string;
             /** Status */
             status: string;
+            /** @description LLM triage result for escalations */
+            triage?: components["schemas"]["TriageOut"] | null;
         };
         /**
          * ProposalStatus
@@ -2223,6 +2236,39 @@ export interface components {
             spend_by_platform: {
                 [key: string]: string;
             };
+        };
+        /**
+         * TriageOut
+         * @description Outcome of LLM triage on an escalation (``params.triage``, Phase 4, D-21).
+         */
+        TriageOut: {
+            /** Action */
+            action?: string | null;
+            /** At */
+            at?: string | null;
+            /** Cause */
+            cause?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Llm Call Id */
+            llm_call_id?: number | null;
+            /**
+             * Outcome
+             * @description proposal | noop | flag_human
+             */
+            outcome: string;
+            /**
+             * Proposal Id
+             * @description proposal created from this escalation
+             */
+            proposal_id?: number | null;
+            /**
+             * Reason
+             * @description model's reason (untrusted text, display only)
+             */
+            reason?: string | null;
+            /** Tier */
+            tier?: string | null;
         };
         /** ValidationError */
         ValidationError: {

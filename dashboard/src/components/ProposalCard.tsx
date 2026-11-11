@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime, formatMoney, humanize, relativeTime } from "@/lib/format";
-import type { DecisionResponse, GuardrailResult, Proposal } from "@/lib/types";
+import type { DecisionResponse, GuardrailResult, Proposal, Triage } from "@/lib/types";
 import { EntityLabel } from "./entityNames";
 import { PlatformBadge, RiskBadge, StatusBadge } from "./badges";
 import { Badge, Button, Card } from "./ui";
@@ -33,6 +33,16 @@ export function guardrailText(g: GuardrailResult | null | undefined): string | n
   if (g.result === "block") return `Blocked (${humanize(g.reason ?? "unknown")})`;
   if (g.result === "needs_approval") return `Needs approval (${(g.reasons ?? []).map(humanize).join(", ") || "—"})`;
   return "Allowed";
+}
+
+/** One-line summary of LLM triage on an escalation (`params.triage`, Phase 4). */
+export function triageText(t: Triage | null | undefined): string | null {
+  if (!t) return null;
+  const conf = typeof t.confidence === "number" ? ` (confidence ${Math.round(t.confidence * 100)}%)` : "";
+  if (t.outcome === "proposal") return `LLM ${t.tier ?? "triage"}: proposed ${humanize(t.action ?? "change")}${conf}${t.proposal_id ? ` → #${t.proposal_id}` : ""}`;
+  if (t.outcome === "noop") return `LLM ${t.tier ?? "triage"}: no action${conf}`;
+  if (t.outcome === "flag_human") return `LLM ${t.tier ?? "triage"}: needs a human${t.cause ? ` — ${t.cause}` : ""}`;
+  return `LLM triage: ${humanize(t.outcome)}`;
 }
 
 export function ProposalCard({
@@ -149,6 +159,19 @@ export function ProposalCard({
               <span title={g.detail && typeof g.detail.why === "string" ? g.detail.why : undefined}>
                 Guardrail: {guardrailText(g)}
                 {g.checked_at ? ` · checked ${formatDateTime(g.checked_at, timezone)}` : ""}
+              </span>
+            )}
+            {p.triage && (
+              <span data-testid="triage" title={p.triage.reason ?? undefined}>
+                {triageText(p.triage)}
+                {p.triage.proposal_id && (
+                  <>
+                    {" "}
+                    <Link href={`/approvals/${p.triage.proposal_id}`} className="text-slate-700 underline-offset-2 hover:underline">
+                      open
+                    </Link>
+                  </>
+                )}
               </span>
             )}
             {p.expires_at && awaiting && <span>Expires {relativeTime(p.expires_at)} ({formatDateTime(p.expires_at, timezone)})</span>}

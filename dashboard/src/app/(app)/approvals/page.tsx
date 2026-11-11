@@ -12,6 +12,7 @@ import { Button, Card, EmptyState, PageHeader } from "@/components/ui";
 
 const TABS: { id: ProposalStatus | "all"; label: string }[] = [
   { id: "awaiting_approval", label: "Awaiting approval" },
+  { id: "escalated", label: "Escalated" },
   { id: "blocked", label: "Blocked" },
   { id: "executed", label: "Executed" },
   { id: "rejected", label: "Rejected" },

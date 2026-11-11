@@ -49,6 +49,7 @@ export type RankingRow = S["RankingRow"];
 
 export type Proposal = S["ProposalOut"];
 export type GuardrailResult = S["GuardrailResultOut"];
+export type Triage = S["TriageOut"];
 export type ValueChange = S["ValueChange"];
 export type Approval = S["ApprovalOut"];
 export type DecisionResponse = S["DecisionResponse"];

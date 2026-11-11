@@ -5,7 +5,7 @@ import { ApiError, setTransport } from "@/lib/api";
 import type { Proposal } from "@/lib/types";
 import { BudgetGauge } from "@/components/charts/BudgetGauge";
 import { MockBanner } from "@/components/MockBanner";
-import { ProposalCard, diffRows, guardrailText } from "@/components/ProposalCard";
+import { ProposalCard, diffRows, guardrailText, triageText } from "@/components/ProposalCard";
 import { QueryState } from "@/components/states";
 
 vi.mock("next/link", () => ({
@@ -131,5 +131,18 @@ describe("guardrailText", () => {
     expect(guardrailText(proposal.guardrail_result)).toBe("Needs approval (Mode suggest)");
     expect(guardrailText({ result: "block", reason: "learning_phase", approved: false })).toBe("Blocked (Learning phase)");
     expect(guardrailText(null)).toBeNull();
+  });
+});
+
+describe("triageText", () => {
+  it("summarises params.triage on escalations", () => {
+    expect(triageText({ outcome: "proposal", action: "budget_change", confidence: 0.78, proposal_id: 44 })).toBe("LLM triage: proposed Budget change (confidence 78%) → #44");
+    expect(triageText({ outcome: "flag_human", cause: "low confidence" })).toBe("LLM triage: needs a human — low confidence");
+    expect(triageText({ outcome: "noop", tier: "analyst" })).toBe("LLM analyst: no action");
+    expect(triageText(null)).toBeNull();
+  });
+  it("renders on the card with a link to the new proposal", () => {
+    render(<ProposalCard p={{ ...proposal, status: "escalated", triage: { outcome: "proposal", action: "pause", proposal_id: 44 } }} canDecide={false} />);
+    expect(screen.getByTestId("triage")).toHaveTextContent("proposed Pause → #44");
   });
 });

@@ -17,12 +17,19 @@ export default function AiUsagePage() {
   return (
     <>
       <PageHeader title="AI usage" subtitle="LLM tokens and cost against the daily and monthly caps (§13.3). Costs are in USD, as set by the LLM_* env prices." />
+      {q.data && (
+        <p className="-mt-2 mb-4 text-xs text-slate-500" data-testid="llm-status">
+          {q.data.llm_enabled
+            ? `LLM on · ${q.data.provider ?? "provider"} · ${q.data.small_model ?? "—"} / ${q.data.large_model ?? "—"}`
+            : `LLM off · ${q.data.disabled_reason ?? "not configured"}`}
+        </p>
+      )}
       <QueryState state={q} feature="AI usage" phase={4}>
         {(u) => {
           if (!u.llm_enabled && u.days.length === 0) {
             return (
               <NotEnabled feature="AI usage" phase={4}>
-                The LLM triage layer is off (LLM_ENABLED=false). Caps when enabled: {formatNumber(u.daily_token_cap)} tokens/day,{" "}
+                The LLM triage layer is off{u.disabled_reason ? ` (${u.disabled_reason})` : ""}. Caps when enabled: {formatNumber(u.daily_token_cap)} tokens/day,{" "}
                 {formatUsd(u.daily_cost_cap_usd)}/day, {formatUsd(u.monthly_cost_cap_usd)}/month.
               </NotEnabled>
             );
