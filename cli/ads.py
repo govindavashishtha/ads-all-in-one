@@ -473,10 +473,17 @@ def kill_switch(
 
 @app.command()
 def run(ctx: typer.Context, job: str) -> None:
-    """Trigger a job now."""
+    """Queue a job run; the engine picks it up within about a minute."""
     c = _ctx(ctx)
     d = Api(c).call("POST", f"jobs/{job}/run")
-    _emit(c, d, lambda d: typer.echo(json.dumps(d, indent=2)))
+    _emit(
+        c,
+        d,
+        lambda d: typer.echo(
+            f"queued {d['job']} as request #{d['id']} ({d['status']}); "
+            "the engine scheduler runs it within ~1 minute"
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- reports

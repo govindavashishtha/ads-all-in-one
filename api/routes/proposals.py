@@ -3,6 +3,7 @@ pages on the dashboard and never act (§14.3)."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +28,7 @@ from api.schemas import (
     RejectRequest,
 )
 from api.services import approvals
+from api.services.entities import parse_guardrail, proposal_change, resolve
 from api.services.queries import audit
 from engine.db.models import Ad, AdGroup, Campaign, Keyword, Proposal
 from engine.enums import Action, EntityType, ProposalSource, ProposalStatus
@@ -43,11 +45,60 @@ _ENTITY_MODELS: dict[EntityType, Any] = {
 }
 
 
+def _outs(db: Session, rows: Sequence[Proposal]) -> list[ProposalOut]:
+    """ProposalOut with the latest approval, entity display fields, typed guardrail result
+    and before → after."""
+    if not rows:
+        return []
+    infos = resolve(db, rows[0].client_id, [(p.entity_type, p.entity_id) for p in rows])
+    out = []
+    for p in rows:
+        appr = approvals.latest_approval(db, p.id)
+        info = infos.get((p.entity_type, p.entity_id))
+        gr = parse_guardrail(p.guardrail_result)
+        base = ProposalOut.model_validate(
+            {
+                **{c: getattr(p, c) for c in _PROPOSAL_COLUMNS},
+                "guardrail_result": gr,
+            }
+        )
+        out.append(
+            base.model_copy(
+                update={
+                    "approval": ApprovalOut.model_validate(appr) if appr else None,
+                    "entity_name": info.entity_name if info else None,
+                    "platform": info.platform if info else None,
+                    "campaign_id": info.campaign_id if info else None,
+                    "campaign_name": info.campaign_name if info else None,
+                    "change": proposal_change(p.action, p.params, p.expected_impact, gr, info),
+                }
+            )
+        )
+    return out
+
+
 def _out(db: Session, p: Proposal) -> ProposalOut:
-    appr = approvals.latest_approval(db, p.id)
-    return ProposalOut.model_validate(p).model_copy(
-        update={"approval": ApprovalOut.model_validate(appr) if appr else None}
-    )
+    return _outs(db, [p])[0]
+
+
+_PROPOSAL_COLUMNS = (
+    "id",
+    "dedupe_key",
+    "as_of",
+    "source",
+    "rule_key",
+    "entity_type",
+    "entity_id",
+    "action",
+    "params",
+    "expected_impact",
+    "reason",
+    "risk",
+    "spend_direction",
+    "status",
+    "expires_at",
+    "created_at",
+)
 
 
 @router.get("", response_model=list[ProposalOut])
@@ -70,7 +121,7 @@ def list_proposals(
     if entity_id is not None:
         q = q.where(Proposal.entity_id == entity_id)
     rows = db.scalars(q.order_by(Proposal.id.desc()).limit(limit).offset(offset)).all()
-    return [_out(db, p) for p in rows]
+    return _outs(db, rows)
 
 
 @router.post("/approve-batch", response_model=BatchDecisionResponse)

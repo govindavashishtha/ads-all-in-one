@@ -12,6 +12,7 @@ from api.auth.adapter import Approver, Viewer
 from api.deps import ClockDep, DbDep, SettingsDep
 from api.errors import NOT_ENABLED_RESPONSES, not_enabled, not_found
 from api.schemas import ChangeOut, EvaluationOut
+from api.services.entities import change_log_change, resolve
 from api.timeutil import parse_days
 from engine.db.models import ChangeLog, Evaluation
 
@@ -59,15 +60,21 @@ def list_changes(
             .order_by(Evaluation.horizon_days)
         ):
             evals[e.change_id].append(e)
+    infos = resolve(db, settings.client_id, [(r.entity_type, r.entity_id) for r in rows])
     out = []
     for r in rows:
         ev = evals.get(r.id, [])
         finals = [e for e in ev if e.horizon_days >= 7 and e.verdict]
+        info = infos.get((r.entity_type, r.entity_id))
         out.append(
             ChangeOut.model_validate(r).model_copy(
                 update={
                     "evaluations": [EvaluationOut.model_validate(e) for e in ev],
                     "verdict": finals[-1].verdict if finals else None,
+                    "entity_name": info.entity_name if info else None,
+                    "campaign_id": info.campaign_id if info else None,
+                    "campaign_name": info.campaign_name if info else None,
+                    "change": change_log_change(r.action, r.before, r.intended, r.after),
                 }
             )
         )

@@ -21,11 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from engine.enums import (
     Action,
     EntityType,
+    JobRequestStatus,
     Mode,
     Platform,
     Risk,
     Role,
 )
+from engine.guardrails.check import BlockReason
 
 
 class _Out(BaseModel):
@@ -143,6 +145,40 @@ class ScoreOut(_Out):
     data_sufficient: bool = False
 
 
+class TargetsOut(_Out):
+    """``targets`` of the active rules version (§11.2, INPUT I-1). Placeholder values until
+    the inputs are confirmed (``inputs_confirmed`` false in the seed)."""
+
+    currency: str | None = None
+    objective: Literal["conversions", "value", "traffic"] | None = None
+    target_cpa: Decimal | None = None
+    target_roas: Decimal | None = None
+    rules_version: int | None = None
+
+
+class ValueChange(_Out):
+    """Human-readable before → after of one proposal / change (values as display strings;
+    money in major units of the client currency)."""
+
+    field: Literal["daily_budget", "status", "negative_keyword", "creative", "campaign", "none"]
+    before: str | None = None
+    after: str | None = None
+    after_is_estimate: bool = Field(
+        default=False,
+        description="true when `after` is the guardrail's clamped value for a proposal that "
+        "has not been applied yet (the executor re-runs the guardrail before applying)",
+    )
+
+
+class EntityRef(_Out):
+    """Display fields of the entity a proposal / change / ranking row points at."""
+
+    entity_name: str | None = None
+    platform: Platform | None = None
+    campaign_id: int | None = None
+    campaign_name: str | None = None
+
+
 # --------------------------------------------------------------------------- overview
 
 
@@ -163,6 +199,44 @@ class SpendBlock(_Out):
     monthly_cap: Decimal | None
     mtd_fraction: float | None
     range: RangeMetrics
+    timezone: str | None = Field(default=None, description="ad account IANA timezone")
+    projected_eod: Decimal | None = Field(
+        default=None,
+        description="pacing job's projected end-of-day spend (§12.4) for `account_date`; null "
+        "when the pacing job has not run today yet or it is before `min_elapsed_hours`",
+    )
+    projected_eod_at: dt.datetime | None = Field(
+        default=None, description="when the pacing job computed `projected_eod` (UTC)"
+    )
+    curve_source: Literal["learned", "linear", "mixed"] = Field(
+        default="linear",
+        description="intraday curve behind `intraday[].expected_cumulative`: learned from the "
+        "last 28 days (§12.4 step 2, ≥ 14 usable days) or the h/24 fallback",
+    )
+    intraday: list[IntradayPoint] = Field(default_factory=list)
+
+
+class IntradayPoint(_Out):
+    """One account-local hour of today. ``expected_cumulative`` = curve(h+1) × daily cap."""
+
+    hour: int = Field(ge=0, le=23)
+    spend: Decimal | None = Field(description="null for hours that have not started yet")
+    cumulative_spend: Decimal | None
+    expected_cumulative: Decimal | None
+
+
+class TrendPoint(_Out):
+    """One complete account day (dates are account-local; platforms summed by date)."""
+
+    date: dt.date
+    impressions: int
+    clicks: int
+    spend: Decimal
+    conversions: Decimal
+    conv_value: Decimal
+    cpa: Decimal | None
+    roas: float | None
+    spend_by_platform: dict[str, Decimal]
 
 
 class AlertCounts(_Out):
@@ -188,6 +262,18 @@ class OverviewResponse(_Out):
     last_synced_at: dict[str, dt.datetime | None]
     limits_version: int | None
     note: str | None = None
+    timezone: str = Field(description="client timezone (TIMEZONE); accounts may differ")
+    targets: TargetsOut | None = None
+    trend_days: int
+    trend: list[TrendPoint] = Field(
+        default_factory=list, description="last `trend_days` complete days, oldest first"
+    )
+    alerts: list[AlertOut] = Field(
+        default_factory=list, description="open warn/critical alerts, newest first (max 10)"
+    )
+    emergency_actions: list[EmergencyActionOut] = Field(
+        default_factory=list, description="active (not restored) emergency actions"
+    )
 
 
 # --------------------------------------------------------------------------- entities
@@ -309,13 +395,29 @@ class RankingRow(ScoreOut):
     platform: Platform
     name: str | None
     status: str | None
-    campaign_id: int | None
+    campaign_id: int | None = Field(description="owning campaign (itself for campaigns)")
+    campaign_name: str | None = None
+    parent_id: int | None = Field(
+        default=None, description="direct parent: campaign for ad groups, ad group for ads/keywords"
+    )
+    parent_name: str | None = None
+    spend: Decimal | None = Field(
+        default=None, description="spend in the settled scoring window (features.spend_s14)"
+    )
+    conversions: Decimal | None = Field(default=None, description="features.conversions_s14")
+    spend_7d: Decimal | None = None
+    conversions_7d: Decimal | None = None
+    fatigue_flag: bool = False
+    learning: bool | None = None
 
 
 class RankingsResponse(_Out):
     level: EntityType
     as_of: dt.date | None
     rows: list[RankingRow]
+    targets: TargetsOut | None = Field(
+        default=None, description="objective and targets the scores were ranked against"
+    )
 
 
 # --------------------------------------------------------------------------- proposals
@@ -333,7 +435,30 @@ class ApprovalOut(_Out):
     comment: str | None
 
 
-class ProposalOut(_Out):
+class GuardrailResultOut(_Out):
+    """Typed ``proposals.guardrail_result`` (written by ``engine.guardrails.check.result_json``).
+
+    - ``allow``: may be applied as is (``new_daily_budget`` for budget changes).
+    - ``needs_approval``: ``reasons`` (e.g. ``mode_suggest``, ``risk_medium``,
+      ``entity_learning``) say why a human must approve.
+    - ``block``: ``reason`` is the first failing §12.3 check (``BlockReason``).
+
+    ``detail`` for budget changes: ``current``, ``start_of_day_budget``,
+    ``requested_change_pct``, ``lower_bound``, ``upper_bound``, ``new`` (strings), and ``why``
+    when the change was too small; for blocks a ``why`` text.
+    """
+
+    result: Literal["allow", "needs_approval", "block"]
+    reason: BlockReason | None = None
+    reasons: list[str] = Field(default_factory=list)
+    new_daily_budget: Decimal | None = None
+    mode: Mode | None = None
+    approved: bool = False
+    checked_at: dt.datetime | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProposalOut(EntityRef):
     id: int
     dedupe_key: str
     as_of: dt.date
@@ -348,10 +473,11 @@ class ProposalOut(_Out):
     risk: str
     spend_direction: str
     status: str
-    guardrail_result: dict[str, Any] | None
+    guardrail_result: GuardrailResultOut | None
     expires_at: dt.datetime | None
     created_at: dt.datetime
     approval: ApprovalOut | None = None
+    change: ValueChange | None = None
 
 
 class ApproveRequest(_In):
@@ -420,7 +546,7 @@ class EvaluationOut(_Out):
     action_taken: str | None
 
 
-class ChangeOut(_Out):
+class ChangeOut(EntityRef):
     id: int
     proposal_id: int | None
     platform: Platform
@@ -439,6 +565,7 @@ class ChangeOut(_Out):
     rollback_of: int | None
     evaluations: list[EvaluationOut] = Field(default_factory=list)
     verdict: str | None = Field(default=None, description="latest final verdict, if any")
+    change: ValueChange | None = None
 
 
 # --------------------------------------------------------------------------- config
@@ -585,6 +712,48 @@ class AdAccountOut(_Out):
     stale: bool = Field(default=False, description="last sync older than 2 h (§21) or never synced")
 
 
+class HeartbeatOut(_Out):
+    """Dead-man's switch (§21): the pacing job pings ``HEARTBEAT_URL`` after each run."""
+
+    configured: bool = Field(description="HEARTBEAT_URL set on the engine (as last reported)")
+    last_status: Literal["ok", "failed", "not_configured", "unknown"] = Field(
+        description="outcome of the latest ping; unknown = the engine has not reported yet"
+    )
+    last_ping_at: dt.datetime | None = None
+    last_pacing_success_at: dt.datetime | None = Field(
+        default=None, description="latest successful `pacing` job_runs row"
+    )
+    healthy: bool = Field(
+        description="pacing succeeded within the last 30 min and the last ping did not fail"
+    )
+    error: str | None = None
+
+
+class PlatformOperationsOut(_Out):
+    """Platform API operations used today by the engine (§4.3; alert at 80 % of the limit)."""
+
+    platform: Platform
+    day: dt.date | None = Field(default=None, description="account-local day of `used`")
+    used: int | None = Field(description="null until the engine has made a call today")
+    limit: int | None = Field(description="daily operation limit; null = no fixed limit (Meta)")
+    fraction: float | None = None
+    access_level: str | None = None
+    updated_at: dt.datetime | None = None
+
+
+class JobRequestOut(_Out):
+    """A manual job trigger (``job_requests`` row) — run by the engine scheduler, not the API."""
+
+    id: int
+    job: str
+    status: JobRequestStatus
+    requested_by: str
+    requested_at: dt.datetime
+    started_at: dt.datetime | None
+    finished_at: dt.datetime | None
+    error: str | None
+
+
 class SystemResponse(_Out):
     client_id: str
     mode: Mode
@@ -596,6 +765,12 @@ class SystemResponse(_Out):
     ad_accounts: list[AdAccountOut]
     latest_job_runs: list[JobRunOut]
     recent_failures: list[JobRunOut]
-    platform_operations_today: dict[str, int | None] = Field(
-        description="platform API operations used today; null until connectors record it"
-    )
+    heartbeat: HeartbeatOut
+    platform_operations: list[PlatformOperationsOut]
+    manual_jobs: list[str] = Field(description="job names accepted by POST /jobs/{name}/run")
+    recent_job_requests: list[JobRequestOut] = Field(default_factory=list)
+
+
+# Resolve forward references (models above refer to ones defined later in this module).
+for _model in (SpendBlock, OverviewResponse):
+    _model.model_rebuild()

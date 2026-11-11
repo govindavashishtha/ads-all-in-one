@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
@@ -12,8 +13,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from engine.config import Settings
-from engine.db.models import Approval, AuditLog, Campaign, Client, ConfigVersion, Proposal
-from tests.api.conftest import BASE, PASSWORD, Clock, World, bearer, build_app
+from engine.db.models import (
+    Approval,
+    AuditLog,
+    Campaign,
+    Client,
+    ConfigVersion,
+    JobRequest,
+    Proposal,
+    SystemStatus,
+)
+from tests.api.conftest import BASE, CID, NOW, PASSWORD, Clock, World, bearer, build_app
 
 pytestmark = pytest.mark.integration
 
@@ -100,8 +110,55 @@ def test_overview(client: TestClient, admin_h: H, world: World) -> None:
     assert d["open_approvals"] == 3 and d["active_emergency_actions"] == 1
     assert d["last_synced_at"]["meta"] is not None
     assert d["limits_version"] == 1
+    # dashboard contract additions
+    assert d["timezone"] == "Asia/Kolkata" and meta["timezone"] == "Asia/Kolkata"
+    assert d["targets"]["objective"] in ("conversions", "value", "traffic")
+    assert d["targets"]["rules_version"] == 1
+    assert d["trend_days"] == 28
+    assert [t["date"] for t in d["trend"]] == [f"2026-11-{x:02d}" for x in range(1, 11)]
+    last = d["trend"][-1]
+    assert last["spend"] == "150.00" and last["spend_by_platform"] == {
+        "meta": "100.00",
+        "google": "50.00",
+    }
+    assert last["cpa"] == "150.00" and last["roas"] == 2.0
+    pace = meta["intraday"]
+    assert len(pace) == 24 and meta["curve_source"] == "linear"  # < 14 complete hourly days
+    assert pace[3]["cumulative_spend"] == "40.00" and pace[12]["cumulative_spend"] == "40.00"
+    assert pace[13]["spend"] is None and pace[13]["cumulative_spend"] is None  # future hour
+    assert pace[11]["expected_cumulative"] == "6000.00"  # 12/24 x 12000 (linear)
+    assert d["total"]["intraday"][23]["expected_cumulative"] == "20000.00"
+    assert meta["projected_eod"] is None and d["total"]["projected_eod"] is None
+    assert [a["kind"] for a in d["alerts"]] == ["pacing_warn"]
+    assert len(d["emergency_actions"]) == 1
     assert client.get(f"{V1}/overview?range=0d", headers=admin_h).status_code == 422
     assert client.get(f"{V1}/overview?range=abc", headers=admin_h).status_code == 422
+
+
+def test_overview_projected_eod_from_pacing_job(
+    client: TestClient, admin_h: H, world: World, seeded: Session
+) -> None:
+    for platform, value in (("meta", "120.00"), ("google", "300.00")):
+        seeded.add(
+            SystemStatus(
+                client_id=CID,
+                key=f"pacing:{platform}",
+                value={"local_date": "2026-11-11", "projected_eod": value},
+                updated_at=NOW,
+            )
+        )
+    seeded.flush()
+    d = client.get(f"{V1}/overview", headers=admin_h).json()
+    meta, google = d["platforms"]
+    assert (meta["projected_eod"], google["projected_eod"]) == ("120.00", "300.00")
+    assert d["total"]["projected_eod"] == "420.00" and meta["projected_eod_at"] is not None
+    # a projection from another account day is not shown
+    seeded.query(SystemStatus).filter(SystemStatus.key == "pacing:meta").update(
+        {"value": {"local_date": "2026-11-10", "projected_eod": "999.00"}}
+    )
+    seeded.flush()
+    d = client.get(f"{V1}/overview", headers=admin_h).json()
+    assert d["platforms"][0]["projected_eod"] is None and d["total"]["projected_eod"] is None
 
 
 def test_overview_without_client_is_503(
@@ -191,12 +248,17 @@ def test_rankings(client: TestClient, viewer_h: H, world: World) -> None:
     d = client.get(f"{V1}/rankings?level=ad", headers=viewer_h).json()
     assert d["as_of"] == "2026-11-10"
     assert [r["entity_id"] for r in d["rows"]] == world.meta_ads
-    assert d["rows"][0]["cpa_p10"] == "300.00" and d["rows"][0]["name"] == "ad 0"
+    row = d["rows"][0]
+    assert row["cpa_p10"] == "300.00" and row["name"] == "ad 0"
+    assert (row["campaign_id"], row["campaign_name"]) == (world.meta_campaign, "meta-c1")
+    assert (row["parent_id"], row["parent_name"]) == (world.meta_adset, "adset 1")
+    assert row["spend"] is None and row["fatigue_flag"] is False  # no features row
+    assert d["targets"]["objective"] is not None
     assert (
         client.get(f"{V1}/rankings?level=ad&platform=google", headers=viewer_h).json()["rows"] == []
     )
     empty = client.get(f"{V1}/rankings?level=keyword", headers=viewer_h).json()
-    assert empty == {"level": "keyword", "as_of": None, "rows": []}
+    assert (empty["level"], empty["as_of"], empty["rows"]) == ("keyword", None, [])
     assert client.get(f"{V1}/rankings?level=bogus", headers=viewer_h).status_code == 422
 
 
@@ -212,8 +274,53 @@ def test_proposals_list_and_get(client: TestClient, viewer_h: H, world: World) -
     }
     p = client.get(f"{V1}/proposals/{world.proposal_waiting}", headers=viewer_h).json()
     assert p["approval"]["channel"] == "slack" and p["approval"]["decided_at"] is None
+    assert (p["entity_name"], p["platform"]) == ("meta-c1", "meta")
+    assert (p["campaign_id"], p["campaign_name"]) == (world.meta_campaign, "meta-c1")
+    assert p["guardrail_result"] is None
+    # no guardrail result yet: before = current budget, after = +15 % estimate
+    assert p["change"] == {
+        "field": "daily_budget",
+        "before": "1000.00",
+        "after": "1150.00",
+        "after_is_estimate": True,
+    }
     assert client.get(f"{V1}/proposals/999999", headers=viewer_h).status_code == 404
     assert client.get(f"{V1}/proposals?status=nope", headers=viewer_h).status_code == 422
+
+
+def test_proposal_typed_guardrail_result(
+    client: TestClient, viewer_h: H, world: World, seeded: Session
+) -> None:
+    p = seeded.get(Proposal, world.proposal_waiting2)
+    assert p is not None
+    p.guardrail_result = {
+        "checked_at": "2026-11-11T01:00:00+00:00",
+        "mode": "suggest",
+        "approved": False,
+        "result": "needs_approval",
+        "reasons": ["mode_suggest"],
+        "new_daily_budget": "1100.00",
+        "detail": {"current": "1000.00", "lower_bound": "800.00", "upper_bound": "1200.00"},
+    }
+    blocked = seeded.get(Proposal, world.proposal_pending)
+    assert blocked is not None
+    blocked.guardrail_result = {"result": "block", "reason": "cooldown", "detail": {}}
+    seeded.flush()
+    d = client.get(f"{V1}/proposals/{world.proposal_waiting2}", headers=viewer_h).json()
+    g = d["guardrail_result"]
+    assert (g["result"], g["reasons"], g["new_daily_budget"], g["reason"]) == (
+        "needs_approval",
+        ["mode_suggest"],
+        "1100.00",
+        None,
+    )
+    assert (d["platform"], d["entity_name"]) == ("google", "google-g1")
+    assert (d["change"]["before"], d["change"]["after"]) == ("1000.00", "1100.00")
+    b = client.get(f"{V1}/proposals/{world.proposal_pending}", headers=viewer_h).json()
+    assert (b["guardrail_result"]["result"], b["guardrail_result"]["reason"]) == (
+        "block",
+        "cooldown",
+    )
 
 
 def test_approve_and_reject(
@@ -355,6 +462,13 @@ def test_changes_and_evaluations(
     rows = client.get(f"{V1}/changes", headers=viewer_h).json()
     assert [r["id"] for r in rows] == [world.change]
     assert rows[0]["verdict"] == "better" and len(rows[0]["evaluations"]) == 2
+    assert rows[0]["entity_name"] == "meta-c1" and rows[0]["campaign_id"] == world.meta_campaign
+    assert rows[0]["change"] == {
+        "field": "status",
+        "before": "ACTIVE",
+        "after": "PAUSED",
+        "after_is_estimate": True,  # intended (no read-back `after` yet)
+    }
     assert client.get(f"{V1}/changes?since=7d", headers=viewer_h).json() == []
     assert len(client.get(f"{V1}/changes?since=2026-11-01", headers=viewer_h).json()) == 1
     assert client.get(f"{V1}/changes?since=lol", headers=viewer_h).status_code == 422
@@ -481,7 +595,7 @@ def test_kill_switch_env_override(
         assert "env KILL_SWITCH" in d["note"]
 
 
-def test_pause_all_and_jobs_not_enabled(
+def test_pause_all_not_enabled(
     client: TestClient, approver_h: H, admin_h: H, seeded: Session
 ) -> None:
     assert client.post(f"{V1}/control/pause-all", headers=approver_h, json={}).status_code == 422
@@ -489,10 +603,31 @@ def test_pause_all_and_jobs_not_enabled(
         f"{V1}/control/pause-all", headers=approver_h, json={"confirm": True, "platform": "meta"}
     )
     assert r.status_code == 501 and r.json()["detail"]["phase"] == "3"
+    assert seeded.get(Client, "client_test").kill_switch is False  # type: ignore[union-attr]
+
+
+def test_jobs_run_queues_a_request(
+    client: TestClient, approver_h: H, admin_h: H, viewer_h: H, seeded: Session
+) -> None:
     assert client.post(f"{V1}/jobs/hourly_pull/run", headers=approver_h).status_code == 403
     assert client.post(f"{V1}/jobs/nope/run", headers=admin_h).status_code == 404
-    assert client.post(f"{V1}/jobs/hourly_pull/run", headers=admin_h).status_code == 501
-    assert seeded.get(Client, "client_test").kill_switch is False  # type: ignore[union-attr]
+    r = client.post(f"{V1}/jobs/emergency_restore/run", headers=admin_h)
+    assert r.status_code == 501 and r.json()["detail"]["phase"] == "3"
+    assert client.post(f"{V1}/jobs/retention/run", headers=admin_h).status_code == 422
+    r = client.post(f"{V1}/jobs/hourly_pull/run", headers=admin_h)
+    assert r.status_code == 202, r.text
+    req = r.json()
+    assert (req["job"], req["status"], req["requested_by"]) == ("hourly_pull", "queued", "admin")
+    dup = client.post(f"{V1}/jobs/hourly_pull/run", headers=admin_h)
+    assert dup.status_code == 409 and dup.json()["detail"]["request_id"] == req["id"]
+    assert client.post(f"{V1}/jobs/pacing/run", headers=admin_h).status_code == 202
+    rows = client.get(f"{V1}/jobs/requests", headers=viewer_h).json()
+    assert {x["job"] for x in rows} == {"hourly_pull", "pacing"}
+    one = client.get(f"{V1}/jobs/requests/{req['id']}", headers=viewer_h).json()
+    assert one["id"] == req["id"]
+    assert client.get(f"{V1}/jobs/requests/999999", headers=viewer_h).status_code == 404
+    assert len(_audit(seeded, "job.run_requested")) == 2
+    assert seeded.scalar(select(JobRequest.status).where(JobRequest.id == req["id"])) == "queued"
 
 
 def test_system(client: TestClient, viewer_h: H, world: World) -> None:
@@ -502,5 +637,60 @@ def test_system(client: TestClient, viewer_h: H, world: World) -> None:
     [latest] = [j for j in d["latest_job_runs"] if j["job"] == "hourly_pull"]
     assert latest["status"] == "success"
     assert [f["error"] for f in d["recent_failures"]] == ["boom"]
-    assert d["platform_operations_today"] == {"meta": None, "google": None}
+    assert d["heartbeat"]["last_status"] == "unknown" and d["heartbeat"]["healthy"] is False
+    ops = {o["platform"]: o for o in d["platform_operations"]}
+    assert ops["google"]["limit"] == 2880 and ops["google"]["used"] is None
+    assert ops["meta"]["limit"] is None
+    assert "daily_pipeline" in d["manual_jobs"] and "retention" not in d["manual_jobs"]
+
+
+def test_system_heartbeat_and_operations(
+    client: TestClient, viewer_h: H, world: World, seeded: Session
+) -> None:
+    from engine.db.models import JobRun
+
+    seeded.add(
+        JobRun(
+            client_id=CID,
+            job="pacing",
+            step=None,
+            window_key="2026-11-11T11:45",
+            started_at=NOW - dt.timedelta(minutes=10),
+            finished_at=NOW - dt.timedelta(minutes=10),
+            status="success",
+        )
+    )
+    seeded.add_all(
+        [
+            SystemStatus(
+                client_id=CID,
+                key="heartbeat",
+                value={
+                    "configured": True,
+                    "last_status": "ok",
+                    "last_ping_at": (NOW - dt.timedelta(minutes=10)).isoformat(),
+                },
+                updated_at=NOW,
+            ),
+            SystemStatus(
+                client_id=CID,
+                key="operations:google",
+                value={"day": "2026-11-11", "used": 1440, "limit": 2880},
+                updated_at=NOW,
+            ),
+            SystemStatus(
+                client_id=CID,
+                key="operations:meta",
+                value={"day": "2026-11-10", "used": 99, "limit": None},
+                updated_at=NOW,
+            ),
+        ]
+    )
+    seeded.flush()
+    d = client.get(f"{V1}/system", headers=viewer_h).json()
+    hb = d["heartbeat"]
+    assert hb["configured"] and hb["last_status"] == "ok" and hb["healthy"] is True
+    ops = {o["platform"]: o for o in d["platform_operations"]}
+    assert (ops["google"]["used"], ops["google"]["fraction"]) == (1440, 0.5)
+    assert (ops["meta"]["used"], ops["meta"]["day"]) == (0, "2026-11-11")  # yesterday's count
     assert d["auth_mode"] == "env"

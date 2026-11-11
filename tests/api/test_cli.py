@@ -118,7 +118,8 @@ def test_not_enabled_commands_exit_4(cli: Cli, world: World) -> None:
     cli("pause-all", code=2)
     cli("pause-all", "--platform", "meta", "--confirm", code=ads.EXIT_NOT_ENABLED)
     cli("restore", str(world.emergency), code=ads.EXIT_NOT_ENABLED)
-    cli("run", "hourly_pull", code=ads.EXIT_NOT_ENABLED)
+    assert "queued hourly_pull as request #" in cli("run", "hourly_pull")
+    cli("run", "emergency_restore", code=ads.EXIT_NOT_ENABLED)
     cli("run", "nope", code=1)
 
 

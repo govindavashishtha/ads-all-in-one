@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy.dialects.postgresql import distinct_on, insert
 
 from api.auth.adapter import Admin, Approver, Viewer
 from api.deps import ClockDep, DbDep, SettingsDep, client_ip, load_client
@@ -15,6 +17,8 @@ from api.schemas import (
     AdAccountOut,
     AlertOut,
     EmergencyActionOut,
+    HeartbeatOut,
+    JobRequestOut,
     JobRunOut,
     KillSwitchRequest,
     KillSwitchResponse,
@@ -22,28 +26,36 @@ from api.schemas import (
     ModeRequest,
     ModeResponse,
     PauseAllRequest,
+    PlatformOperationsOut,
     SystemResponse,
 )
 from api.services.queries import audit
-from engine.db.models import AdAccount, Alert, Client, EmergencyAction, JobRun
-from engine.enums import JobStatus, Mode, Platform, Severity
+from engine.connectors.factory import COUNTERS
+from engine.db.models import AdAccount, Alert, Client, EmergencyAction, JobRequest, JobRun
+from engine.enums import JobRequestStatus, JobStatus, Mode, Platform, Severity
+from engine.jobs.manual import MANUAL_JOBS
+from engine.system_status import HEARTBEAT, get_statuses, operations_key
 
 router = APIRouter(tags=["ops"])
 
-# §9 job names (manual trigger targets).
+# §9 job names. MANUAL_JOBS (engine.jobs.manual) can be queued via POST /jobs/{name}/run;
+# the others answer 501 (later phase) or 422 (operator CLI only).
 JOB_NAMES = (
-    "pacing",
-    "hourly_pull",
-    "daily_pipeline",
-    "search_terms",
-    "weekly_strategy",
-    "approval_expiry",
+    *MANUAL_JOBS,
     "emergency_restore",
     "token_reset",
     "retention",
     "backfill",
 )
+_LATER_PHASE = {"emergency_restore": "3", "token_reset": "4"}
 STALE_AFTER = dt.timedelta(hours=2)
+HEARTBEAT_HEALTHY_WITHIN = dt.timedelta(minutes=30)
+# Daily operation limit per platform as configured in the engine's connector counters
+# (engine/connectors/factory.py COUNTERS; Google = Explorer access, VERIFY-P0 V-1).
+ACCESS_LEVEL = {
+    Platform.META: "no fixed daily limit (rate-limited per app/account)",
+    Platform.GOOGLE: "explorer (assumed until Basic access is confirmed, VERIFY-P0 V-1)",
+}
 
 
 # --------------------------------------------------------------------------- alerts
@@ -225,17 +237,115 @@ def pause_all(*, body: PauseAllRequest, user: Approver) -> None:
 # --------------------------------------------------------------------------- jobs
 
 
-@router.post("/jobs/{name}/run", responses=NOT_ENABLED_RESPONSES)
-def run_job(*, name: str, user: Admin) -> None:
-    """Manual job trigger. The scheduler runs in the engine container; the API→engine
-    trigger channel is not built yet."""
+@router.post(
+    "/jobs/{name}/run",
+    status_code=202,
+    response_model=JobRequestOut,
+    responses={
+        **NOT_ENABLED_RESPONSES,
+        409: {"description": "a request for this job is already queued or running"},
+    },
+)
+def run_job(
+    *,
+    name: str,
+    request: Request,
+    user: Admin,
+    db: DbDep,
+    settings: SettingsDep,
+    clock: ClockDep,
+) -> JobRequestOut:
+    """Queue a manual run (§17, §19 ``ads run``). The API never runs jobs itself: it inserts a
+    ``job_requests`` row that the engine scheduler picks up within about a minute (poll it via
+    ``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request
+    per job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a
+    no-op. Nothing here writes to an ad platform."""
     if name not in JOB_NAMES:
         raise HTTPException(404, f"unknown job {name!r}; known: {', '.join(JOB_NAMES)}")
-    not_enabled(
-        "1",
-        f"manual trigger of {name!r} needs an API-to-engine trigger channel, which is not "
-        "built yet; jobs currently run only on the engine scheduler.",
+    if name in _LATER_PHASE:
+        not_enabled(_LATER_PHASE[name], f"job {name!r} ships in Phase {_LATER_PHASE[name]}")
+    if name not in MANUAL_JOBS:
+        raise HTTPException(
+            422,
+            f"job {name!r} cannot be triggered from the API; operators run it with "
+            f"`python -m engine.jobs {name}` on the engine host",
+        )
+    client = load_client(db, settings)
+    now = clock()
+    new_id = db.scalar(
+        insert(JobRequest)
+        .values(
+            client_id=client.client_id,
+            job=name,
+            requested_by=user.username,
+            requested_at=now,
+            status=JobRequestStatus.QUEUED.value,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["client_id", "job"],
+            index_where=JobRequest.status.in_(
+                [JobRequestStatus.QUEUED.value, JobRequestStatus.RUNNING.value]
+            ),
+        )
+        .returning(JobRequest.id)
     )
+    if new_id is None:
+        db.rollback()
+        open_req = db.scalars(
+            select(JobRequest).where(
+                JobRequest.client_id == client.client_id,
+                JobRequest.job == name,
+                JobRequest.status.in_(
+                    [JobRequestStatus.QUEUED.value, JobRequestStatus.RUNNING.value]
+                ),
+            )
+        ).first()
+        raise HTTPException(
+            409,
+            {
+                "code": "already_queued",
+                "message": f"a {name!r} request is already "
+                f"{open_req.status if open_req else 'open'}",
+                "request_id": open_req.id if open_req else None,
+            },
+        )
+    audit(
+        db,
+        client_id=client.client_id,
+        actor=user.username,
+        action="job.run_requested",
+        target=f"job_request:{new_id}",
+        payload={"job": name},
+        ip=client_ip(request),
+        at=now,
+    )
+    db.commit()
+    req = db.get(JobRequest, new_id)
+    assert req is not None
+    return JobRequestOut.model_validate(req)
+
+
+@router.get("/jobs/requests", response_model=list[JobRequestOut])
+def list_job_requests(
+    *, user: Viewer, db: DbDep, settings: SettingsDep, limit: int = Query(50, ge=1, le=500)
+) -> list[JobRequestOut]:
+    rows = db.scalars(
+        select(JobRequest)
+        .where(JobRequest.client_id == settings.client_id)
+        .order_by(JobRequest.requested_at.desc(), JobRequest.id.desc())
+        .limit(limit)
+    ).all()
+    return [JobRequestOut.model_validate(r) for r in rows]
+
+
+@router.get("/jobs/requests/{request_id}", response_model=JobRequestOut)
+def get_job_request(
+    *, request_id: int, user: Viewer, db: DbDep, settings: SettingsDep
+) -> JobRequestOut:
+    r = db.get(JobRequest, request_id)
+    if r is None or r.client_id != settings.client_id:
+        not_found("job request", request_id)
+    return JobRequestOut.model_validate(r)
 
 
 # --------------------------------------------------------------------------- system
@@ -283,5 +393,89 @@ def system(*, user: Viewer, db: DbDep, settings: SettingsDep, clock: ClockDep) -
         ad_accounts=accounts,
         latest_job_runs=[JobRunOut.model_validate(j) for j in latest],
         recent_failures=[JobRunOut.model_validate(j) for j in failures],
-        platform_operations_today={p.value: None for p in Platform},
+        heartbeat=_heartbeat(db, client.client_id, now),
+        platform_operations=_operations(db, client.client_id, now, accounts),
+        manual_jobs=list(MANUAL_JOBS),
+        recent_job_requests=[
+            JobRequestOut.model_validate(r)
+            for r in db.scalars(
+                select(JobRequest)
+                .where(JobRequest.client_id == client.client_id)
+                .order_by(JobRequest.requested_at.desc(), JobRequest.id.desc())
+                .limit(10)
+            )
+        ],
     )
+
+
+def _parse_ts(v: Any) -> dt.datetime | None:
+    if not isinstance(v, str):
+        return None
+    try:
+        return dt.datetime.fromisoformat(v)
+    except ValueError:
+        return None
+
+
+def _heartbeat(db: DbDep, cid: str, now: dt.datetime) -> HeartbeatOut:
+    last_ok = db.scalar(
+        select(JobRun.finished_at)
+        .where(
+            JobRun.client_id == cid,
+            JobRun.job == "pacing",
+            JobRun.status == JobStatus.SUCCESS.value,
+        )
+        .order_by(JobRun.finished_at.desc().nulls_last())
+        .limit(1)
+    )
+    snap = get_statuses(db, cid, [HEARTBEAT]).get(HEARTBEAT)
+    value = snap[0] if snap else {}
+    status = value.get("last_status") if snap else "unknown"
+    if status not in ("ok", "failed", "not_configured"):
+        status = "unknown"
+    recent = last_ok is not None and now - last_ok <= HEARTBEAT_HEALTHY_WITHIN
+    return HeartbeatOut(
+        configured=bool(value.get("configured")),
+        last_status=status,
+        last_ping_at=_parse_ts(value.get("last_ping_at")),
+        last_pacing_success_at=last_ok,
+        healthy=recent and status != "failed",
+        error=value.get("error") if isinstance(value.get("error"), str) else None,
+    )
+
+
+def _operations(
+    db: DbDep, cid: str, now: dt.datetime, accounts: list[AdAccountOut]
+) -> list[PlatformOperationsOut]:
+    snaps = get_statuses(db, cid, [operations_key(p.value) for p in Platform])
+    zones = {a.platform: a.timezone for a in accounts}
+    out = []
+    for p in Platform:
+        limit = COUNTERS[p].daily_limit
+        used: int | None = None
+        day: dt.date | None = None
+        updated: dt.datetime | None = None
+        snap = snaps.get(operations_key(p.value))
+        if snap is not None:
+            value, updated = snap
+            try:
+                day = dt.date.fromisoformat(str(value.get("day")))
+                used = int(value.get("used"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                day, used = None, None
+            tz = zones.get(p)
+            if day is not None and tz is not None and day != now.astimezone(ZoneInfo(tz)).date():
+                used = 0  # counter is from an earlier account day: nothing used today yet
+                day = now.astimezone(ZoneInfo(tz)).date()
+        out.append(
+            PlatformOperationsOut(
+                platform=p,
+                day=day,
+                used=used,
+                limit=limit,
+                fraction=(used / limit) if used is not None and limit else None,
+                access_level=ACCESS_LEVEL[p],
+                updated_at=updated,
+            )
+        )
+    return out

@@ -784,6 +784,22 @@
         "title": "BatchDecisionResponse",
         "type": "object"
       },
+      "BlockReason": {
+        "description": "Block reasons in \u00a712.3 order.",
+        "enum": [
+          "mode_read_only",
+          "kill_switch",
+          "not_managed",
+          "unsupported_scope",
+          "cooldown",
+          "learning_phase",
+          "min_active_ads",
+          "change_too_small",
+          "cap_exceeded"
+        ],
+        "title": "BlockReason",
+        "type": "string"
+      },
       "CampaignDetail": {
         "properties": {
           "ad_account_id": {
@@ -1192,9 +1208,52 @@
             ],
             "title": "Before"
           },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entity_id": {
             "title": "Entity Id",
             "type": "integer"
+          },
+          "entity_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Name"
           },
           "entity_type": {
             "$ref": "#/components/schemas/EntityType"
@@ -1294,9 +1353,9 @@
           }
         },
         "required": [
+          "platform",
           "id",
           "proposal_id",
-          "platform",
           "entity_type",
           "entity_id",
           "action",
@@ -1731,6 +1790,85 @@
         "title": "EvaluationOut",
         "type": "object"
       },
+      "GuardrailResultOut": {
+        "description": "Typed ``proposals.guardrail_result`` (written by ``engine.guardrails.check.result_json``).\n\n- ``allow``: may be applied as is (``new_daily_budget`` for budget changes).\n- ``needs_approval``: ``reasons`` (e.g. ``mode_suggest``, ``risk_medium``,\n  ``entity_learning``) say why a human must approve.\n- ``block``: ``reason`` is the first failing \u00a712.3 check (``BlockReason``).\n\n``detail`` for budget changes: ``current``, ``start_of_day_budget``,\n``requested_change_pct``, ``lower_bound``, ``upper_bound``, ``new`` (strings), and ``why``\nwhen the change was too small; for blocks a ``why`` text.",
+        "properties": {
+          "approved": {
+            "default": false,
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "new_daily_budget": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Daily Budget"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "result": {
+            "enum": [
+              "allow",
+              "needs_approval",
+              "block"
+            ],
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "GuardrailResultOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1743,6 +1881,212 @@
         },
         "title": "HTTPValidationError",
         "type": "object"
+      },
+      "HeartbeatOut": {
+        "description": "Dead-man's switch (\u00a721): the pacing job pings ``HEARTBEAT_URL`` after each run.",
+        "properties": {
+          "configured": {
+            "description": "HEARTBEAT_URL set on the engine (as last reported)",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "healthy": {
+            "description": "pacing succeeded within the last 30 min and the last ping did not fail",
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "last_pacing_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest successful `pacing` job_runs row",
+            "title": "Last Pacing Success At"
+          },
+          "last_ping_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ping At"
+          },
+          "last_status": {
+            "description": "outcome of the latest ping; unknown = the engine has not reported yet",
+            "enum": [
+              "ok",
+              "failed",
+              "not_configured",
+              "unknown"
+            ],
+            "title": "Last Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "last_status",
+          "healthy"
+        ],
+        "title": "HeartbeatOut",
+        "type": "object"
+      },
+      "IntradayPoint": {
+        "description": "One account-local hour of today. ``expected_cumulative`` = curve(h+1) \u00d7 daily cap.",
+        "properties": {
+          "cumulative_spend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulative Spend"
+          },
+          "expected_cumulative": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Cumulative"
+          },
+          "hour": {
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Hour",
+            "type": "integer"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null for hours that have not started yet",
+            "title": "Spend"
+          }
+        },
+        "required": [
+          "hour",
+          "spend",
+          "cumulative_spend",
+          "expected_cumulative"
+        ],
+        "title": "IntradayPoint",
+        "type": "object"
+      },
+      "JobRequestOut": {
+        "description": "A manual job trigger (``job_requests`` row) \u2014 run by the engine scheduler, not the API.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job": {
+            "title": "Job",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobRequestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "job",
+          "status",
+          "requested_by",
+          "requested_at",
+          "started_at",
+          "finished_at",
+          "error"
+        ],
+        "title": "JobRequestOut",
+        "type": "object"
+      },
+      "JobRequestStatus": {
+        "description": "``job_requests.status`` (API \u2192 engine manual trigger queue, migration 0003).",
+        "enum": [
+          "queued",
+          "running",
+          "success",
+          "failed",
+          "rejected"
+        ],
+        "title": "JobRequestStatus",
+        "type": "string"
       },
       "JobRunOut": {
         "properties": {
@@ -2510,6 +2854,14 @@
             "title": "Active Emergency Actions",
             "type": "integer"
           },
+          "alerts": {
+            "description": "open warn/critical alerts, newest first (max 10)",
+            "items": {
+              "$ref": "#/components/schemas/AlertOut"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
           "client_id": {
             "title": "Client Id",
             "type": "string"
@@ -2521,6 +2873,14 @@
           "currency": {
             "title": "Currency",
             "type": "string"
+          },
+          "emergency_actions": {
+            "description": "active (not restored) emergency actions",
+            "items": {
+              "$ref": "#/components/schemas/EmergencyActionOut"
+            },
+            "title": "Emergency Actions",
+            "type": "array"
           },
           "hard_max_mode": {
             "$ref": "#/components/schemas/Mode"
@@ -2586,8 +2946,35 @@
             "title": "Range Days",
             "type": "integer"
           },
+          "targets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timezone": {
+            "description": "client timezone (TIMEZONE); accounts may differ",
+            "title": "Timezone",
+            "type": "string"
+          },
           "total": {
             "$ref": "#/components/schemas/SpendBlock"
+          },
+          "trend": {
+            "description": "last `trend_days` complete days, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/TrendPoint"
+            },
+            "title": "Trend",
+            "type": "array"
+          },
+          "trend_days": {
+            "title": "Trend Days",
+            "type": "integer"
           }
         },
         "required": [
@@ -2604,7 +2991,9 @@
           "open_approvals",
           "active_emergency_actions",
           "last_synced_at",
-          "limits_version"
+          "limits_version",
+          "timezone",
+          "trend_days"
         ],
         "title": "OverviewResponse",
         "type": "object"
@@ -2639,6 +3028,92 @@
         "title": "Platform",
         "type": "string"
       },
+      "PlatformOperationsOut": {
+        "description": "Platform API operations used today by the engine (\u00a74.3; alert at 80 % of the limit).",
+        "properties": {
+          "access_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Level"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "account-local day of `used`",
+            "title": "Day"
+          },
+          "fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fraction"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "daily operation limit; null = no fixed limit (Meta)",
+            "title": "Limit"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/Platform"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until the engine has made a call today",
+            "title": "Used"
+          }
+        },
+        "required": [
+          "platform",
+          "used",
+          "limit"
+        ],
+        "title": "PlatformOperationsOut",
+        "type": "object"
+      },
       "ProposalOut": {
         "properties": {
           "action": {
@@ -2660,6 +3135,38 @@
             "title": "As Of",
             "type": "string"
           },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2672,6 +3179,17 @@
           "entity_id": {
             "title": "Entity Id",
             "type": "integer"
+          },
+          "entity_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Name"
           },
           "entity_type": {
             "$ref": "#/components/schemas/EntityType"
@@ -2703,14 +3221,12 @@
           "guardrail_result": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/GuardrailResultOut"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Guardrail Result"
+            ]
           },
           "id": {
             "title": "Id",
@@ -2727,6 +3243,16 @@
               }
             ],
             "title": "Params"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Platform"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reason": {
             "anyOf": [
@@ -2921,7 +3447,19 @@
                 "type": "null"
               }
             ],
+            "description": "owning campaign (itself for campaigns)",
             "title": "Campaign Id"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
           },
           "composite": {
             "anyOf": [
@@ -2933,6 +3471,29 @@
               }
             ],
             "title": "Composite"
+          },
+          "conversions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "features.conversions_s14",
+            "title": "Conversions"
+          },
+          "conversions_7d": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversions 7D"
           },
           "cpa_p10": {
             "anyOf": [
@@ -3012,6 +3573,22 @@
           "entity_type": {
             "$ref": "#/components/schemas/EntityType"
           },
+          "fatigue_flag": {
+            "default": false,
+            "title": "Fatigue Flag",
+            "type": "boolean"
+          },
+          "learning": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning"
+          },
           "name": {
             "anyOf": [
               {
@@ -3033,6 +3610,29 @@
               }
             ],
             "title": "P Beats Target"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "direct parent: campaign for ad groups, ad group for ads/keywords",
+            "title": "Parent Id"
+          },
+          "parent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Name"
           },
           "peer_group": {
             "anyOf": [
@@ -3114,6 +3714,29 @@
             ],
             "title": "Roas Shrunk"
           },
+          "spend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "spend in the settled scoring window (features.spend_s14)",
+            "title": "Spend"
+          },
+          "spend_7d": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend 7D"
+          },
           "status": {
             "anyOf": [
               {
@@ -3161,6 +3784,17 @@
             },
             "title": "Rows",
             "type": "array"
+          },
+          "targets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "objective and targets the scores were ranked against"
           }
         },
         "required": [
@@ -3482,6 +4116,17 @@
             "description": "'today' in the ad account's timezone",
             "title": "Account Date"
           },
+          "curve_source": {
+            "default": "linear",
+            "description": "intraday curve behind `intraday[].expected_cumulative`: learned from the last 28 days (\u00a712.4 step 2, \u2265 14 usable days) or the h/24 fallback",
+            "enum": [
+              "learned",
+              "linear",
+              "mixed"
+            ],
+            "title": "Curve Source",
+            "type": "string"
+          },
           "daily_cap": {
             "anyOf": [
               {
@@ -3503,6 +4148,13 @@
               }
             ],
             "title": "Elapsed Day Fraction"
+          },
+          "intraday": {
+            "items": {
+              "$ref": "#/components/schemas/IntradayPoint"
+            },
+            "title": "Intraday",
+            "type": "array"
           },
           "monthly_cap": {
             "anyOf": [
@@ -3539,6 +4191,31 @@
             "title": "Platform",
             "type": "string"
           },
+          "projected_eod": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pacing job's projected end-of-day spend (\u00a712.4) for `account_date`; null when the pacing job has not run today yet or it is before `min_elapsed_hours`",
+            "title": "Projected Eod"
+          },
+          "projected_eod_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "when the pacing job computed `projected_eod` (UTC)",
+            "title": "Projected Eod At"
+          },
           "range": {
             "$ref": "#/components/schemas/RangeMetrics"
           },
@@ -3556,6 +4233,18 @@
               }
             ],
             "title": "Spent Fraction Today"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ad account IANA timezone",
+            "title": "Timezone"
           }
         },
         "required": [
@@ -3596,6 +4285,9 @@
           "hard_max_mode": {
             "$ref": "#/components/schemas/Mode"
           },
+          "heartbeat": {
+            "$ref": "#/components/schemas/HeartbeatOut"
+          },
           "kill_switch": {
             "$ref": "#/components/schemas/KillSwitchState"
           },
@@ -3606,29 +4298,36 @@
             "title": "Latest Job Runs",
             "type": "array"
           },
+          "manual_jobs": {
+            "description": "job names accepted by POST /jobs/{name}/run",
+            "items": {
+              "type": "string"
+            },
+            "title": "Manual Jobs",
+            "type": "array"
+          },
           "mode": {
             "$ref": "#/components/schemas/Mode"
           },
-          "platform_operations_today": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+          "platform_operations": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformOperationsOut"
             },
-            "description": "platform API operations used today; null until connectors record it",
-            "title": "Platform Operations Today",
-            "type": "object"
+            "title": "Platform Operations",
+            "type": "array"
           },
           "recent_failures": {
             "items": {
               "$ref": "#/components/schemas/JobRunOut"
             },
             "title": "Recent Failures",
+            "type": "array"
+          },
+          "recent_job_requests": {
+            "items": {
+              "$ref": "#/components/schemas/JobRequestOut"
+            },
+            "title": "Recent Job Requests",
             "type": "array"
           },
           "server_time": {
@@ -3648,9 +4347,78 @@
           "ad_accounts",
           "latest_job_runs",
           "recent_failures",
-          "platform_operations_today"
+          "heartbeat",
+          "platform_operations",
+          "manual_jobs"
         ],
         "title": "SystemResponse",
+        "type": "object"
+      },
+      "TargetsOut": {
+        "description": "``targets`` of the active rules version (\u00a711.2, INPUT I-1). Placeholder values until\nthe inputs are confirmed (``inputs_confirmed`` false in the seed).",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "enum": [
+                  "conversions",
+                  "value",
+                  "traffic"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "rules_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rules Version"
+          },
+          "target_cpa": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Cpa"
+          },
+          "target_roas": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Roas"
+          }
+        },
+        "title": "TargetsOut",
         "type": "object"
       },
       "TokenRequest": {
@@ -3721,6 +4489,78 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TrendPoint": {
+        "description": "One complete account day (dates are account-local; platforms summed by date).",
+        "properties": {
+          "clicks": {
+            "title": "Clicks",
+            "type": "integer"
+          },
+          "conv_value": {
+            "title": "Conv Value",
+            "type": "string"
+          },
+          "conversions": {
+            "title": "Conversions",
+            "type": "string"
+          },
+          "cpa": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpa"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "impressions": {
+            "title": "Impressions",
+            "type": "integer"
+          },
+          "roas": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roas"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "string"
+          },
+          "spend_by_platform": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Spend By Platform",
+            "type": "object"
+          }
+        },
+        "required": [
+          "date",
+          "impressions",
+          "clicks",
+          "spend",
+          "conversions",
+          "conv_value",
+          "cpa",
+          "roas",
+          "spend_by_platform"
+        ],
+        "title": "TrendPoint",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -3759,6 +4599,56 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValueChange": {
+        "description": "Human-readable before \u2192 after of one proposal / change (values as display strings;\nmoney in major units of the client currency).",
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "after_is_estimate": {
+            "default": false,
+            "description": "true when `after` is the guardrail's clamped value for a proposal that has not been applied yet (the executor re-runs the guardrail before applying)",
+            "title": "After Is Estimate",
+            "type": "boolean"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "field": {
+            "enum": [
+              "daily_budget",
+              "status",
+              "negative_keyword",
+              "creative",
+              "campaign",
+              "none"
+            ],
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "ValueChange",
         "type": "object"
       }
     }
@@ -4886,9 +5776,100 @@
         ]
       }
     },
+    "/api/v1/jobs/requests": {
+      "get": {
+        "operationId": "list_job_requests_api_v1_jobs_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobRequestOut"
+                  },
+                  "title": "Response List Job Requests Api V1 Jobs Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Job Requests",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/jobs/requests/{request_id}": {
+      "get": {
+        "operationId": "get_job_request_api_v1_jobs_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Request",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
     "/api/v1/jobs/{name}/run": {
       "post": {
-        "description": "Manual job trigger. The scheduler runs in the engine container; the API\u2192engine\ntrigger channel is not built yet.",
+        "description": "Queue a manual run (\u00a717, \u00a719 ``ads run``). The API never runs jobs itself: it inserts a\n``job_requests`` row that the engine scheduler picks up within about a minute (poll it via\n``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request\nper job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a\nno-op. Nothing here writes to an ad platform.",
         "operationId": "run_job_api_v1_jobs__name__run_post",
         "parameters": [
           {
@@ -4902,13 +5883,18 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobRequestOut"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "a request for this job is already queued or running"
           },
           "422": {
             "content": {
@@ -5281,6 +6267,20 @@
               "description": "e.g. 7d, 28d (complete account days)",
               "title": "Range",
               "type": "string"
+            }
+          },
+          {
+            "description": "days in `trend` (complete days)",
+            "in": "query",
+            "name": "trend_days",
+            "required": false,
+            "schema": {
+              "default": 28,
+              "description": "days in `trend` (complete days)",
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Trend Days",
+              "type": "integer"
             }
           }
         ],
@@ -5708,7 +6708,7 @@
     },
     "/api/v1/rankings": {
       "get": {
-        "description": "Rows from the latest ``scores.as_of`` for the level (empty until scoring runs).",
+        "description": "Rows from the latest ``scores.as_of`` for the level (empty until scoring runs), with\nthe settled-window spend/conversions and fatigue flag from ``features`` of the same\n``as_of``, the owning campaign / direct parent, and the targets they were ranked against.",
         "operationId": "rankings_api_v1_rankings_get",
         "parameters": [
           {
