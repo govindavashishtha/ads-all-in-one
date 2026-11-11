@@ -22,6 +22,7 @@ single module that knows paths, methods and CSRF. When the API changes: regenera
 | Proposals / changes | `entity_name`, `platform`, `campaign_id`, `campaign_name`, `change {field, before, after, after_is_estimate}`; typed `guardrail_result {result, reason, reasons[], new_daily_budget, mode, approved, checked_at, detail}` | names and before → after come from the API; no `/campaigns` lookups |
 | Rankings | `campaign_name`, `parent_id`/`parent_name`, `spend`/`conversions` (14 d) and `_7d`, `fatigue_flag`, `learning`, response `targets` | Spend · conv column, fatigue/learning badges, target label from the response |
 | System | `heartbeat {configured, last_status, last_ping_at, last_pacing_success_at, healthy, error}`, `platform_operations[] {platform, day, used, limit, fraction, access_level}`, `manual_jobs[]`, `recent_job_requests[]` | heartbeat/ops cards from the API; "Run a job" card (admin) |
+| Escalations / LLM | `ProposalOut.triage` (from `params.triage`); `/llm/usage` `llm_enabled` + `disabled_reason` from the engine's status | "Escalated" tab; triage line + link to the proposal it created; AI usage shows LLM on/off and why |
 | Jobs | `POST /jobs/{name}/run` → 202 `JobRequest` (queued; the engine picks it up within ~1 min), 409 `already_queued`, 404 unknown, 422 CLI-only, 501 for Phase 3/4 jobs; `GET /jobs/requests[/{id}]` | `RunJobCard` |
 
 ## Still open

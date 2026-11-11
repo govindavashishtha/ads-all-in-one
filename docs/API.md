@@ -74,7 +74,7 @@ ships in the named phase. DB-only writes (no ad-platform call) are audited in `a
 | PUT | `/campaigns/{id}/managed` `{managed, reason?}` | admin | live | DB flag (INPUT I-3) |
 | GET | `/metrics?entity_type=&entity_id=&grain=day\|hour&from=&to=&platform=` | viewer | live | hour only for account/campaign |
 | GET | `/rankings?level=ad\|ad_group\|keyword\|campaign&platform=&top=` | viewer | live | latest `scores.as_of`; empty until scoring runs (Phase 2); rows carry campaign/parent names, 14 d + 7 d spend/conversions, `fatigue_flag`, `learning`; response carries `targets` |
-| GET | `/proposals?status=` · `/proposals/{id}` | viewer | live | includes latest approval row, `entity_name`, `platform`, `campaign_id/name`, `change {field,before,after,after_is_estimate}` and a typed `guardrail_result` |
+| GET | `/proposals?status=` · `/proposals/{id}` | viewer | live | includes latest approval row, `entity_name`, `platform`, `campaign_id/name`, `change {field,before,after,after_is_estimate}`, a typed `guardrail_result`, and for escalations (status `escalated`) the LLM `triage {outcome, action, confidence, tier, reason, cause, llm_call_id, proposal_id, at}` from `params.triage` |
 | POST | `/proposals/{id}/approve` `{comment?}` · `/reject` `{reason}` · `/approve-batch` `{ids,comment?}` | approver | live | records decision → `approved`/`rejected`; 409 if not `awaiting_approval` or expired. **The executor (Phase 3) re-runs the guardrail with fresh state before applying; nothing is sent to a platform now** |
 | POST | `/proposals` | admin | live | manual `source=human` proposal inserted `pending`; guardrailed by the pipeline's guardrail step |
 | GET | `/proposals/{id}/dry-run` | viewer | **501** (Phase 3) | executor builds payloads |
@@ -83,7 +83,7 @@ ships in the named phase. DB-only writes (no ad-platform call) are audited in `a
 | GET | `/evaluations?change_id=&open_only=` | viewer | live | |
 | GET | `/rules`, `/limits` | viewer | live | active version + history |
 | PUT | `/rules`, `/limits` `{body, reason}` | admin | live | new active version; schema + registry names + `HARD_*` ceilings + currency validated (422) |
-| GET | `/llm/usage?range=30d` | viewer | live | from `llm_calls` (empty until Phase 4; `llm_enabled=false`) |
+| GET | `/llm/usage?range=30d` | viewer | live | from `llm_calls` (days in the client timezone, by call time); `llm_enabled`, `provider`, `disabled_reason`, models from `engine.llm.status.llm_status` (same decision the engine makes) |
 | GET | `/alerts?open=true&severity=` · POST `/alerts/{id}/ack` | viewer · approver | live | |
 | GET | `/emergency-actions?active_only=` | viewer | live | |
 | POST | `/emergency-actions/{id}/restore` | approver | **501** (Phase 3) | |
