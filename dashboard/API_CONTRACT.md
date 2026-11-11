@@ -15,18 +15,22 @@ single module that knows paths, methods and CSRF. When the API changes: regenera
 - Approval links: `/ads-autopilot/approvals/{proposal_id}`; the page only reads
   `GET /proposals/{id}`. Decisions are `POST /proposals/{id}/approve|reject` (+ `/approve-batch`).
 
-## Gaps (dashboard works around them; asks for the API agent)
-| Area | Gap in the contract | What the dashboard does | Ask |
-|---|---|---|---|
-| Overview | No daily trend, no intraday pace series, no projected EOD, no targets, no timezone, no alert list | `lib/overview.ts` composes: `/metrics` (account level, day series for 28 days + today's hour series per ad account), `/system` (ad accounts → timezone), `/rules` (`active.body.targets`), `/alerts?open=true` | Optional: expose the pacing job's learned intraday curve / projected EOD |
-| Pacing chart | Learned intraday curve not exposed | Linear `h/24 × daily cap` reference line, labelled as such | as above |
-| Proposals | `ProposalOut` has no `entity_name`, `platform`, `before`/`after` | Name/platform from `GET /campaigns` for campaign-level proposals, otherwise "Ad #id"; before→after derived from `params.current_budget` and `guardrail_result.new_budget` (format of `guardrail_result` not specified) | Add `entity_name`, `platform`, and a typed `guardrail_result` (`result`, `reason`, `step`, `new_budget`) |
-| Changes | `ChangeOut` has no `entity_name` | Same name lookup as proposals | Add `entity_name` |
-| Rankings | `RankingRow` has no spend/conversions, parent name or fatigue flag; objective/targets not included | Parent campaign from `campaign_id` + `/campaigns`; objective + targets from `/rules`; "not enabled yet" when `as_of` is null and `rows` is empty | Optional: include `objective`/target in the response |
-| System | No heartbeat status, no per-platform op limit; `platform_operations_today` values null until connectors record them | Heartbeat = last successful `pacing` run (healthy if ≤ 30 min old); Google limit assumed 2,880/day (Explorer), noted on the page | Expose `heartbeat {last_ping_at, last_status}` and the Google access level / limit |
-| Executor | `dry-run`, `rollback`, `restore`, `pause-all`, `jobs/run` answer 501 | Buttons stay; the 501 message and phase are shown inline | — (Phase 3) |
-| LLM | Before Phase 4 `llm_enabled: false` with no data | "Not enabled yet" card showing the caps | — |
+## Former gaps (closed in the API, integration pass)
+| Area | Now in the contract | Dashboard |
+|---|---|---|
+| Overview | `timezone`, `targets`, `trend[]` (`trend_days`, default 28, 1–90), per-block `intraday[]` (hourly + cumulative + expected cumulative), `projected_eod` / `projected_eod_at` / `curve_source` (same-day pacing snapshot only, else `null`), `alerts[]` (open warn/critical), `emergency_actions[]` | one `GET /overview?range=7d&trend_days=28` call (`lib/overview.ts`); expected line uses the pacing job's curve (`learned` or `default`) |
+| Proposals / changes | `entity_name`, `platform`, `campaign_id`, `campaign_name`, `change {field, before, after, after_is_estimate}`; typed `guardrail_result {result, reason, reasons[], new_daily_budget, mode, approved, checked_at, detail}` | names and before → after come from the API; no `/campaigns` lookups |
+| Rankings | `campaign_name`, `parent_id`/`parent_name`, `spend`/`conversions` (14 d) and `_7d`, `fatigue_flag`, `learning`, response `targets` | Spend · conv column, fatigue/learning badges, target label from the response |
+| System | `heartbeat {configured, last_status, last_ping_at, last_pacing_success_at, healthy, error}`, `platform_operations[] {platform, day, used, limit, fraction, access_level}`, `manual_jobs[]`, `recent_job_requests[]` | heartbeat/ops cards from the API; "Run a job" card (admin) |
+| Jobs | `POST /jobs/{name}/run` → 202 `JobRequest` (queued; the engine picks it up within ~1 min), 409 `already_queued`, 404 unknown, 422 CLI-only, 501 for Phase 3/4 jobs; `GET /jobs/requests[/{id}]` | `RunJobCard` |
 
-## Not verified
-- End-to-end against the real API (only the mock transport, which mirrors the OpenAPI shapes
-  and type-checks against the generated types, was exercised in a browser).
+## Still open
+| Area | State | Dashboard |
+|---|---|---|
+| Executor | `dry-run`, `rollback`, `restore`, `pause-all` answer 501 (Phase 3) | buttons stay; the 501 message and phase are shown inline |
+| LLM | before Phase 4 `llm_enabled: false` with no data | "Not enabled yet" card showing the caps |
+
+## Verified
+- Mock transport mirrors the OpenAPI shapes and type-checks against the generated types.
+- End-to-end against the real API (`ads_autopilot_score_demo`, real build behind Caddy on
+  `:8080/ads-autopilot`): `node scripts/screenshots.mjs --real` (see its header).

@@ -12,13 +12,19 @@ make migrate && make bootstrap                   # schema + seed client (needs H
 uv run python -c "from argon2 import PasswordHasher; print(PasswordHasher().hash('…'))"
 #   -> put the hash in ADMIN_PASSWORD_HASH; set SECRET_KEY (32+ chars)
 uv run uvicorn api.main:app --port 8000          # direct: http://127.0.0.1:8000/api/v1
-# behind Caddy (§18): https://<host>/ads-autopilot/api/v1  (prefix stripped by the proxy)
+# behind Caddy (§18): https://<host>/ads-autopilot/api/v1  (prefix stripped by the proxy);
+# then also pass --root-path /ads-autopilot (so /api/v1/docs loads openapi.json through the
+# prefix) and --proxy-headers --forwarded-allow-ips=<proxy IP or CIDR> (docker-compose.yml pins
+# the proxy to ${PROXY_IP:-172.30.57.10} on network ${ADS_SUBNET:-172.30.57.0/24})
 uv run ads --api-url http://127.0.0.1:8000/api/v1 login
 uv run ads status
 ```
 
 Tests: `TEST_DATABASE_URL=postgresql+psycopg://ads:ads@127.0.0.1:5432/ads_autopilot_test_api make test`
 (API/CLI tests live in `tests/api/`, marked `integration`).
+
+Cookies are always `Secure`: browsers only store them over HTTPS or on `http://localhost`.
+Any other host needs TLS at the proxy (Caddy's automatic HTTPS with a real `SITE_ADDRESS`).
 
 ## Auth (AUTH_MODE=env)
 
@@ -63,16 +69,16 @@ ships in the named phase. DB-only writes (no ad-platform call) are audited in `a
 | POST | `/auth/logout` | viewer | live | revokes current session |
 | GET | `/auth/me` | viewer | live | |
 | GET | `/auth/sessions` · POST `/auth/sessions/{id}/revoke` | admin | live | extra to §17 |
-| GET | `/overview?range=7d` | viewer | live | per platform + total: spend today / daily cap, MTD / monthly cap, range CPA/ROAS/CTR, elapsed-day fraction, alert counts, open approvals, active emergency actions, mode, kill switch. Projected EOD (intraday curve) is the pacing job's, not exposed yet |
+| GET | `/overview?range=7d` | viewer | live | per platform + total: spend today / daily cap, MTD / monthly cap, range CPA/ROAS/CTR, elapsed-day fraction, alert counts, open approvals, active emergency actions, mode, kill switch; `timezone`, `targets`, daily `trend[]` (`trend_days` 1–90, default 28), per-block `intraday[]` with the expected cumulative curve (pacing job's learned/default curve), `projected_eod` from the same-day pacing snapshot (`system_status`), else `null`; open warn/critical `alerts[]` |
 | GET | `/campaigns` (`platform`,`managed`,`status`,`range`) · `/campaigns/{id}` · `/ad-groups/{id}` · `/ads/{id}` · `/keywords?ad_group_id=` | viewer | live | each row has `metrics` (range sums) + latest `score`; details nest children |
 | PUT | `/campaigns/{id}/managed` `{managed, reason?}` | admin | live | DB flag (INPUT I-3) |
 | GET | `/metrics?entity_type=&entity_id=&grain=day\|hour&from=&to=&platform=` | viewer | live | hour only for account/campaign |
-| GET | `/rankings?level=ad\|ad_group\|keyword\|campaign&platform=&top=` | viewer | live | latest `scores.as_of`; empty until scoring runs (Phase 2) |
-| GET | `/proposals?status=` · `/proposals/{id}` | viewer | live | includes latest approval row |
+| GET | `/rankings?level=ad\|ad_group\|keyword\|campaign&platform=&top=` | viewer | live | latest `scores.as_of`; empty until scoring runs (Phase 2); rows carry campaign/parent names, 14 d + 7 d spend/conversions, `fatigue_flag`, `learning`; response carries `targets` |
+| GET | `/proposals?status=` · `/proposals/{id}` | viewer | live | includes latest approval row, `entity_name`, `platform`, `campaign_id/name`, `change {field,before,after,after_is_estimate}` and a typed `guardrail_result` |
 | POST | `/proposals/{id}/approve` `{comment?}` · `/reject` `{reason}` · `/approve-batch` `{ids,comment?}` | approver | live | records decision → `approved`/`rejected`; 409 if not `awaiting_approval` or expired. **The executor (Phase 3) re-runs the guardrail with fresh state before applying; nothing is sent to a platform now** |
 | POST | `/proposals` | admin | live | manual `source=human` proposal inserted `pending`; guardrailed by the pipeline's guardrail step |
 | GET | `/proposals/{id}/dry-run` | viewer | **501** (Phase 3) | executor builds payloads |
-| GET | `/changes?since=7d\|YYYY-MM-DD&status=` | viewer | live | with evaluations + latest D+7/D+14 `verdict` |
+| GET | `/changes?since=7d\|YYYY-MM-DD&status=` | viewer | live | with evaluations + latest D+7/D+14 `verdict`; same `entity_name`/`change` fields as proposals |
 | POST | `/changes/{id}/rollback` | approver | **501** (Phase 3) | |
 | GET | `/evaluations?change_id=&open_only=` | viewer | live | |
 | GET | `/rules`, `/limits` | viewer | live | active version + history |
@@ -84,8 +90,9 @@ ships in the named phase. DB-only writes (no ad-platform call) are audited in `a
 | POST | `/control/mode` `{mode, reason?}` | admin | live | 403 above `HARD_MAX_MODE` |
 | POST | `/control/kill-switch` `{on, reason?}` | admin | live | returns effective/db/env; env override can't be cleared |
 | POST | `/control/pause-all` `{platform?, confirm:true}` | approver | **501** (Phase 3) | 422 without `confirm` |
-| POST | `/jobs/{name}/run` | admin | **501** | needs an API→engine trigger channel (not built); 404 for unknown job names |
-| GET | `/system` | viewer | live | ad accounts + staleness (>2 h), latest run per job/step, 7-day failures; `platform_operations_today` null until connectors record it |
+| POST | `/jobs/{name}/run` | admin | live | inserts a `job_requests` row (202 + request); the engine's `job_requests` poller (every minute) runs whitelisted jobs (`manual_jobs` in `/system`) with the normal advisory lock + `job_runs` idempotency. 409 `already_queued` (one open request per job), 404 unknown, 422 CLI-only (`retention`, `backfill`), **501** `emergency_restore` (Phase 3), `token_reset` (Phase 4). Audited `job.run_requested` |
+| GET | `/jobs/requests?limit=` · `/jobs/requests/{id}` | admin | live | queue status: `queued → running → success/failed`; `rejected` for names not whitelisted by the engine; running > 6 h → failed |
+| GET | `/system` | viewer | live | ad accounts + staleness (>2 h), latest run per job/step, 7-day failures, `heartbeat` (healthy = pacing ok within 30 min and last ping not failed), `platform_operations[]` (today's count published by the engine, limit + access level), `manual_jobs`, `recent_job_requests` |
 | GET | `/metrics` (root, not `/api/v1`) | bearer `METRICS_TOKEN` | live | Prometheus; 404 if token unset; not routed by the proxy |
 
 ## CLI (§19)
