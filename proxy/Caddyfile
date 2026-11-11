@@ -1,0 +1,23 @@
+# Reverse proxy (BUILD_PLAN §18). SITE_ADDRESS: ":80" locally, or your domain for automatic TLS.
+# Order matters: API first, then the dashboard. The API's Prometheus endpoint is served at
+# the API root (/metrics) and is deliberately NOT routable through this proxy.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	@api path /ads-autopilot/api/*
+	handle @api {
+		# API receives /api/v1/...
+		uri strip_prefix /ads-autopilot
+		reverse_proxy api:8000
+	}
+
+	@dashboard path /ads-autopilot /ads-autopilot/*
+	handle @dashboard {
+		# No rewrite: Next.js handles its own basePath.
+		reverse_proxy dashboard:3000
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

@@ -1,0 +1,75 @@
+# Services per BUILD_PLAN §5: postgres, engine, api, dashboard, proxy.
+# Copy .env.example to .env and fill it first. Postgres is not published to the host (§20).
+name: ads-autopilot
+
+x-python-service: &python-service
+  build:
+    context: .
+    dockerfile: docker/python.Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://ads:ads@postgres:5432/ads_autopilot}
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ads}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ads}  # change for any non-local deployment
+      POSTGRES_DB: ${POSTGRES_DB:-ads_autopilot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  engine:
+    <<: *python-service
+    command: ["/app/docker/engine-entrypoint.sh"]
+
+  api:
+    <<: *python-service
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/ads-autopilot}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/ads-autopilot/api/v1}
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - dashboard
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
