@@ -201,14 +201,15 @@ def test_end_to_end_into_postgres_and_idempotent(env: dict[str, Any]) -> None:
     learning = dict(q(engine, "SELECT external_id, learning FROM campaigns WHERE client_id=:c"))
     assert learning["900001"] is True and learning["900002"] is False
     assert learning["800002"] is True and learning["800001"] is False
-    # daily pipeline: ingestion + Phase 2 steps ran; triage/executor/evaluator still skipped
+    # daily pipeline: ingestion + Phase 2 steps ran; executor/evaluator still skipped,
+    # triage (Phase 4) runs with the LLM disabled
     steps = dict(
         q(engine, "SELECT step, status FROM job_runs WHERE client_id=:c AND job='daily_pipeline'")
     )
     assert steps["repull"] == "success" and steps["windows"] == "success"
     assert steps["features"] == "success" and steps["score"] == "success"
     assert steps["rules"] == "success" and steps["digest"] == "success"
-    assert steps["triage"] == "skipped" and steps["execute"] == "skipped"
+    assert steps["triage"] == "success" and steps["execute"] == "skipped"
 
     # re-run the same windows: every completed step is skipped, nothing changes
     second = run_all(ctx)

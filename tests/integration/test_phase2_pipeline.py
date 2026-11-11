@@ -155,7 +155,8 @@ def test_phase2_pipeline(env: dict[str, Any], make_settings: Callable[..., Setti
     )
     for step in SCORING_STEPS:
         assert steps[step] == "success", step
-    assert steps["triage"] == "skipped" and steps["execute"] == "skipped"
+    # triage (Phase 4) runs with the LLM disabled: escalations → flag_human
+    assert steps["triage"] == "success" and steps["execute"] == "skipped"
     c1 = counts(engine)
     assert c1["features"] > 0 and c1["scores"] > 0 and c1["proposals"] > 0
     ranks = q(
