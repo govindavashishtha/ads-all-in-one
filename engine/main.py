@@ -1,7 +1,7 @@
 """Engine entry point (plan §3, §5, §15).
 
-Phase 0: configure logging, run bootstrap (§7.1), start an empty APScheduler. Later agents
-register jobs in ``register_jobs`` and add the startup reconciler (§15) before the scheduler.
+Configure logging, run bootstrap (§7.1), wire the emergency hook and run the startup
+reconciler (§15), then start APScheduler with the §9 jobs.
 """
 
 from __future__ import annotations
@@ -29,9 +29,12 @@ def build_scheduler(settings: Settings) -> BackgroundScheduler:
 
 def register_jobs(scheduler: BackgroundScheduler, settings: Settings) -> None:
     """Jobs from §9 are added here by their owners (pacing/approval_expiry use 300 s grace)."""
-    from engine.jobs.schedule import default_context, register_ingestion_jobs
+    from engine.jobs.schedule import default_context, register_ingestion_jobs, startup
 
-    register_ingestion_jobs(scheduler, default_context(settings))
+    ctx = default_context(settings)
+    reconciled = startup(ctx)  # §15: startup reconciler runs before the scheduler
+    log.info("engine.reconciled", **reconciled)
+    register_ingestion_jobs(scheduler, ctx)
 
 
 def main() -> None:

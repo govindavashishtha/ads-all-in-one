@@ -75,6 +75,18 @@ def _register_phase4() -> None:
 _register_phase4()
 
 
+def _register_phase3() -> None:
+    """Phase 3 (executor agent): step 4 ``evaluate`` and step 9 ``execute``. Imported late:
+    the executor imports job helpers."""
+    from engine.executor.jobs import evaluate_step, execute_step
+
+    register_step("evaluate", evaluate_step)
+    register_step("execute", execute_step)
+
+
+_register_phase3()
+
+
 def daily_pipeline(ctx: JobContext) -> list[StepResult]:
     as_of = client_yesterday(ctx.now(), ctx.settings.timezone)
     window = as_of.isoformat()

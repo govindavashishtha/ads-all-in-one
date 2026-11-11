@@ -30,6 +30,13 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
         "approval_expiry",
         "notify_dispatch",
         "job_requests",  # manual-trigger queue poller (migration 0003)
+        # Phase 3
+        "emergency_restore",
+        "reconcile",
+        "evaluate",
+        "execute_approved",
+        "token_reset",
+        "write_requests",  # write-request queue poller (migration 0004)
     }
     jobs = {j.id: j for j in sched.get_jobs()}
     assert str(jobs["pacing"].trigger.fields[6]) == "*/15"  # minute field
@@ -46,6 +53,9 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
     )
     assert jobs["approval_expiry"].misfire_grace_time == 300  # §5
     assert str(jobs["approval_expiry"].trigger.fields[6]) == "*/15"
+    assert str(jobs["emergency_restore"].trigger.fields[6]) == "10"  # §9: hourly :10
+    reset = jobs["token_reset"].trigger
+    assert (str(reset.fields[5]), str(reset.fields[6])) == ("0", "0")  # §9: 00:00
     assert all(j.max_instances == 1 and j.coalesce for j in jobs.values())
 
 

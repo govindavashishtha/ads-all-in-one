@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 import structlog
 from prometheus_client import Counter, Histogram
@@ -46,6 +47,10 @@ class JobContext:
     sessions: sessionmaker[Session]
     connectors: ConnectorFactory
     clock: Callable[[], dt.datetime] = _utcnow
+    # Phase 3: write-side client provider for the executor (engine.executor.clients). None =
+    # production (``RealWriteClients``: write credential via the credentials provider). Typed
+    # loosely so job plumbing never imports the executor / write connectors.
+    write_clients: Any = None
 
     @property
     def client_id(self) -> str:

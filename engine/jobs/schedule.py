@@ -21,6 +21,15 @@ from engine.config import Settings
 from engine.connectors.factory import COUNTERS, ConnectorFactory
 from engine.db.session import make_engine, make_sessionmaker
 from engine.enums import Severity
+from engine.executor.jobs import (
+    emergency_restore_job,
+    evaluate_job,
+    execute_approved_job,
+    reconcile_job,
+    startup_reconcile,
+    token_reset_job,
+    write_requests_job,
+)
 from engine.ingest.alerts import raise_alert
 from engine.jobs.daily import daily_pipeline
 from engine.jobs.ingestion import health_checks, hourly_pull, retention, search_terms
@@ -47,9 +56,17 @@ SCHEDULE: dict[str, tuple[Callable[[JobContext], Any], dict[str, Any], int | Non
     "weekly_strategy": (weekly_strategy, {"day_of_week": "mon", "hour": 7, "minute": 0}, None),
     "approval_expiry": (approval_expiry, {"minute": "*/15"}, 300),
     "notify_dispatch": (notify_dispatch, {"minute": "*/5"}, 300),
+    # Phase 3 (executor agent)
+    "emergency_restore": (emergency_restore_job, {"minute": 10}, None),
+    "reconcile": (reconcile_job, {"minute": 20}, None),
+    "evaluate": (evaluate_job, {"minute": 40}, None),
+    "execute_approved": (execute_approved_job, {"minute": "*/5"}, 300),
+    "token_reset": (token_reset_job, {"hour": 0, "minute": 0}, None),
 }
-# Not a §9 job: polls the manual-trigger queue (migration 0003) every minute.
+# Not §9 jobs: poll the manual-trigger queue (migration 0003) and the write-request queue
+# (migration 0004, D-29) every minute.
 REQUESTS_JOB = "job_requests"
+WRITE_REQUESTS_JOB = "write_requests"
 
 
 def run_job_requests(ctx: JobContext) -> int:
@@ -170,4 +187,30 @@ def register_ingestion_jobs(scheduler: BaseScheduler, ctx: JobContext) -> list[s
         misfire_grace_time=60,
     )
     ids.append(REQUESTS_JOB)
+    scheduler.add_job(
+        make_runner(ctx, scheduler, WRITE_REQUESTS_JOB, write_requests_job),
+        "cron",
+        timezone=ctx.settings.timezone,
+        minute="*",
+        id=WRITE_REQUESTS_JOB,
+        name=WRITE_REQUESTS_JOB,
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+    ids.append(WRITE_REQUESTS_JOB)
     return ids
+
+
+def install_write_path() -> None:
+    """Phase 3: wire the pacing emergency hook (engine.pacing.emergency)."""
+    from engine.pacing.emergency import install
+
+    install()
+
+
+def startup(ctx: JobContext) -> dict[str, int]:
+    """Before the scheduler starts (§15): emergency hook + startup reconciler."""
+    install_write_path()
+    return startup_reconcile(ctx)

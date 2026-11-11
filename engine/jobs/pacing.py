@@ -1,11 +1,12 @@
-"""``pacing`` job, every 15 min — Phase 1 = ALERTS ONLY (plan §12.4 steps 1–5, §21).
+"""``pacing`` job, every 15 min (plan §12.4 steps 1–5, §21).
 
 Reads today's spend (account + campaign) from the platform, projects end-of-day spend with the
-intraday curve, and raises deduped ``warn`` / ``critical`` alerts. It never writes to a
-platform and never imports a WriteConnector: in Phase 1 an emergency condition only raises the
-``critical`` alert (in every mode). The executor agent adds the pause path in
-``engine/pacing/emergency.py`` at Phase 3 (hook: ``EMERGENCY_HANDLER``). Pings
-``HEARTBEAT_URL`` after a successful run (§21 dead-man's switch).
+intraday curve, and raises deduped ``warn`` / ``critical`` alerts. This module never writes to
+a platform and never imports a WriteConnector. On an emergency condition it raises the
+``critical`` alert (every mode) and then calls ``EMERGENCY_HANDLER`` — wired by the scheduler
+to ``engine.pacing.emergency.emergency_handler`` (Phase 3), which pauses managed campaigns
+only if mode ≠ read_only, ``emergency_stop_enabled`` and the write gate is open (D-28), and
+raises its own result alert. Pings ``HEARTBEAT_URL`` after a successful run (§21).
 """
 
 from __future__ import annotations
@@ -45,8 +46,10 @@ class EmergencyCondition:
     cap: Decimal
 
 
-# Phase 3 hook (executor agent): called with the conditions after alerts are raised.
-EMERGENCY_HANDLER: Callable[[Session, Sequence[EmergencyCondition], Mode], None] | None = None
+# Phase 3 hook (executor agent): called with the conditions after alerts are raised. The
+# handler runs its own transactions (the write-ahead log must commit before each write).
+EmergencyHandler = Callable[[JobContext, Session, Sequence[EmergencyCondition], Mode], object]
+EMERGENCY_HANDLER: EmergencyHandler | None = None
 
 
 # ----------------------------------------------------------------------- pure functions
@@ -366,11 +369,14 @@ def _raise_pacing_alerts(
     day = results[0].local_date.isoformat() if results else ""
     for c in conditions:
         scope = c.platform.value if c.platform else "total"
-        why = (
-            "mode read_only: alert only"
-            if mode is Mode.READ_ONLY
-            else "Phase 1: emergency stop not wired yet — alert only, NOTHING was paused"
-        )
+        if mode is Mode.READ_ONLY:
+            why = "mode read_only: alert only"
+        elif EMERGENCY_HANDLER is None:
+            why = "emergency stop not wired — alert only, NOTHING was paused"
+        elif not limits.pacing.emergency_stop_enabled:
+            why = "emergency_stop_enabled = false: alert only, NOTHING was paused"
+        else:
+            why = "emergency stop engaged: see the emergency_stop result alert"
         raise_alert(
             s,
             ctx.client_id,
@@ -382,7 +388,7 @@ def _raise_pacing_alerts(
         )
         n += 1
     if conditions and EMERGENCY_HANDLER is not None and limits.pacing.emergency_stop_enabled:
-        EMERGENCY_HANDLER(s, conditions, mode)
+        EMERGENCY_HANDLER(ctx, s, conditions, mode)
     return n
 
 
