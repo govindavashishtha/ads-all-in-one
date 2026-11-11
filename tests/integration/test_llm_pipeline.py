@@ -261,7 +261,10 @@ def test_fake_llm_triage_creates_guardrailed_proposals_and_ledger(
         "AND dedupe_key=:k",
         k=f"digest:{AS_OF.isoformat()}",
     )
-    assert "LLM cost" in digest[0]
+    assert "LLM cost yesterday" in digest[0]
+    # triage calls are logged on the run day (T0), so they show under "today so far"
+    today_cost = sum(r.cost_usd for r in ledger)
+    assert f"today so far (incl. this run's triage): ${today_cost:.5f}" in digest[0]
 
 
 def test_analyst_path_via_escalate_large(

@@ -229,7 +229,7 @@ def approvals_step(ctx: JobContext, session: Session) -> StepOutcome:
 
 def digest_step(ctx: JobContext, session: Session) -> StepOutcome:
     as_of = as_of_for(ctx)
-    digest = build_digest(session, ctx.settings, as_of)
+    digest = build_digest(session, ctx.settings, as_of, ctx.now())
     store_digest(session, ctx.settings, digest)
     return StepOutcome(rows=1, details={"subject": digest.subject})
 

@@ -85,12 +85,32 @@ def _roas(t: dict[str, Decimal]) -> float | None:
     return round(float(t["value"] / t["spend"]), 2) if t["spend"] > 0 else None
 
 
-def build_digest(session: Session, settings: Settings, as_of: dt.date) -> Digest:
+def _llm_cost(session: Session, cid: str, start: dt.datetime, end: dt.datetime) -> Decimal:
+    v = session.scalar(
+        select(func.coalesce(func.sum(LLMCall.cost_usd), 0)).where(
+            LLMCall.client_id == cid, LLMCall.created_at >= start, LLMCall.created_at < end
+        )
+    )
+    return Decimal(v or 0)
+
+
+def _llm_cost_line(d: dict[str, Any]) -> str:
+    line = f"LLM cost yesterday ({d['as_of']}, by call time, {d.get('timezone', '')}): "
+    line += f"${d['llm_cost_usd']}"
+    if d.get("llm_cost_today_usd") is not None:
+        line += f" · today so far (incl. this run's triage): ${d['llm_cost_today_usd']}"
+    return line
+
+
+def build_digest(
+    session: Session, settings: Settings, as_of: dt.date, now: dt.datetime | None = None
+) -> Digest:
+    """``now`` (the run clock) adds today's LLM cost so far, which includes this run's triage."""
     cid = settings.client_id
     client = session.get(Client, cid)
     rules = active_rules(session, cid)
     limits = active_limits(session, cid)
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(client.timezone if client is not None else settings.timezone)
     day_start = dt.datetime.combine(as_of, dt.time(), tzinfo=tz).astimezone(dt.UTC)
     day_end = day_start + dt.timedelta(days=1)
     y = _platform_totals(session, cid, as_of, as_of)
@@ -187,10 +207,14 @@ def build_digest(session: Session, settings: Settings, as_of: dt.date) -> Digest
         .limit(10)
     ).all()
     escalated = [p for p in props if p.status == ProposalStatus.ESCALATED.value]
-    llm_cost = session.scalar(
-        select(func.coalesce(func.sum(LLMCall.cost_usd), 0)).where(
-            LLMCall.client_id == cid, LLMCall.created_at >= day_start, LLMCall.created_at < day_end
-        )
+    # LLM calls are bucketed by their own timestamp in the client timezone (triage runs on the
+    # run day, not on ``as_of``): "yesterday" = calls made on the as_of local day, "today" =
+    # calls since local midnight up to the run clock (includes this run's triage).
+    llm_cost = _llm_cost(session, cid, day_start, day_end)
+    llm_cost_today = (
+        _llm_cost(session, cid, day_end, now + dt.timedelta(microseconds=1))
+        if now is not None and now >= day_end
+        else None
     )
     data: dict[str, Any] = {
         "as_of": as_of.isoformat(),
@@ -235,6 +259,12 @@ def build_digest(session: Session, settings: Settings, as_of: dt.date) -> Digest
             for p in escalated
         ],
         "llm_cost_usd": str(Decimal(llm_cost or 0).quantize(Decimal("0.00001"))),
+        "llm_cost_today_usd": (
+            None
+            if llm_cost_today is None
+            else str(Decimal(llm_cost_today).quantize(Decimal("0.00001")))
+        ),
+        "timezone": tz.key,
     }
     subject = (
         f"[ads-autopilot] Daily digest {as_of.isoformat()} — spend "
@@ -292,7 +322,7 @@ def render_text(d: dict[str, Any]) -> str:
         for x in d["escalated"]:
             out.append(f"  #{x['id']} {x['rule']} {x['entity']} → {x['triage']}")
     out.append("")
-    out.append(f"LLM cost yesterday: ${d['llm_cost_usd']}")
+    out.append(_llm_cost_line(d))
     return "\n".join(out) + "\n"
 
 
@@ -388,7 +418,7 @@ def render_html(d: dict[str, Any], subject: str) -> str:
                 [[x["id"], x["rule"], x["entity"], x["triage"]] for x in d["escalated"]],
             )
         )
-    parts.append(f"<p>LLM cost yesterday: ${escape(d['llm_cost_usd'])}</p>")
+    parts.append(f"<p>{escape(_llm_cost_line(d))}</p>")
     return "<html><body>" + "".join(parts) + "</body></html>"
 
 
