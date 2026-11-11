@@ -24,6 +24,8 @@ function OverviewBody({ v }: { v: OverviewView }) {
   const tRoas = toNum(targets.target_roas);
   const cpa = toNum(r.cpa ?? null);
   const lastSync = Object.values(ov.last_synced_at ?? {}).filter(Boolean).sort()[0] ?? null;
+  // The total block has no single account day; use the first platform that reports one.
+  const dayBlock = ov.total.account_date ? ov.total : ov.platforms.find((b) => b.account_date) ?? ov.total;
   const ks = ov.kill_switch;
 
   return (
@@ -48,7 +50,7 @@ function OverviewBody({ v }: { v: OverviewView }) {
       <Card>
         <CardHeader
           title="Spend today vs daily cap"
-          subtitle={`Account day ${ov.total.account_date ?? "—"}${tz ? ` (${tz})` : ""} · ${formatPct(ov.total.elapsed_day_fraction, 0)} of the day elapsed · oldest sync ${relativeTime(lastSync)}`}
+          subtitle={`Account day ${dayBlock?.account_date ?? "—"}${tz ? ` (${tz})` : ""} · ${formatPct(dayBlock?.elapsed_day_fraction ?? null, 0)} of the day elapsed · oldest sync ${relativeTime(lastSync)}`}
           right={<ExampleTag />}
         />
         <CardBody className="grid grid-cols-1 gap-6 sm:grid-cols-3">

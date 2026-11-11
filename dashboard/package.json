@@ -11,7 +11,8 @@
     "test": "vitest run",
     "build:mock": "NEXT_PUBLIC_MOCK_API=true next build",
     "screenshots": "node scripts/screenshots.mjs",
-    "gen:api": "openapi-typescript ../docs/openapi.json -o src/lib/openapi.gen.ts"
+    "gen:api": "openapi-typescript ../docs/openapi.json -o src/lib/openapi.gen.ts",
+    "smoke:real": "node scripts/smoke-real.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

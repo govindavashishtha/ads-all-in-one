@@ -34,4 +34,4 @@ single module that knows paths, methods and CSRF. When the API changes: regenera
 ## Verified
 - Mock transport mirrors the OpenAPI shapes and type-checks against the generated types.
 - End-to-end against the real API (`ads_autopilot_score_demo`, real build behind Caddy on
-  `:8080/ads-autopilot`): `node scripts/screenshots.mjs --real` (see its header).
+  `:8080/ads-autopilot`): `ADS_PASSWORD=… npm run smoke:real` (`scripts/smoke-real.mjs`, see its header; screenshots `real-*.png`). Mock-mode smoke stays `npm run screenshots`.
