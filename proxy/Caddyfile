@@ -6,7 +6,9 @@
 
 	@api path /ads-autopilot/api/*
 	handle @api {
-		# API receives /api/v1/...
+		# API receives /api/v1/... (uvicorn --root-path=/ads-autopilot restores the public prefix
+		# for /api/v1/docs). Caddy ignores an incoming X-Forwarded-For (no trusted_proxies) and
+		# sends the real peer address; the API trusts forwarded headers only from this proxy.
 		uri strip_prefix /ads-autopilot
 		reverse_proxy api:8000
 	}

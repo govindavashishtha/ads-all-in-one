@@ -1,5 +1,15 @@
 # Services per BUILD_PLAN §5: postgres, engine, api, dashboard, proxy.
 # Copy .env.example to .env and fill it first. Postgres is not published to the host (§20).
+#
+# Proxy/API contract (§18):
+# - Caddy strips /ads-autopilot, so the API sees /api/v1/...; uvicorn --root-path tells
+#   FastAPI its public prefix, so /ads-autopilot/api/v1/docs loads the right openapi.json.
+#   (Hitting the api container directly, /api/v1/docs then points at the prefixed URL.)
+# - The proxy has a fixed address on the `ads` network and is the ONLY host uvicorn trusts for
+#   X-Forwarded-For/-Proto, so the per-IP login rate limit sees the real client IP and a
+#   client cannot spoof it. Caddy itself overwrites X-Forwarded-For with the peer address.
+# - Session cookies are `Secure`: browsers only send them over HTTPS (or http://localhost).
+#   Outside localhost set SITE_ADDRESS to a domain (Caddy gets a certificate automatically).
 name: ads-autopilot
 
 x-python-service: &python-service
@@ -14,6 +24,8 @@ x-python-service: &python-service
   depends_on:
     postgres:
       condition: service_healthy
+  networks:
+    - ads
   restart: unless-stopped
 
 services:
@@ -30,6 +42,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - ads
     restart: unless-stopped
 
   engine:
@@ -38,7 +52,14 @@ services:
 
   api:
     <<: *python-service
-    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    command:
+      - uvicorn
+      - api.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --proxy-headers
+      - --forwarded-allow-ips=${PROXY_IP:-172.30.57.10}
+      - --root-path=${NEXT_PUBLIC_BASE_PATH:-/ads-autopilot}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
       interval: 15s
@@ -51,6 +72,8 @@ services:
       args:
         NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/ads-autopilot}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/ads-autopilot/api/v1}
+    networks:
+      - ads
     restart: unless-stopped
 
   proxy:
@@ -67,7 +90,16 @@ services:
     depends_on:
       - api
       - dashboard
+    networks:
+      ads:
+        ipv4_address: ${PROXY_IP:-172.30.57.10}
     restart: unless-stopped
+
+networks:
+  ads:
+    ipam:
+      config:
+        - subnet: ${ADS_SUBNET:-172.30.57.0/24}
 
 volumes:
   pgdata:
