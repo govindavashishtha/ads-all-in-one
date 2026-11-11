@@ -140,6 +140,24 @@ class ChangeStatus(StrEnum):
     ROLLED_BACK = "rolled_back"
 
 
+class ChangeOrigin(StrEnum):
+    """Why a ``change_log`` row exists (migration 0004, DECISIONS D-27)."""
+
+    PROPOSAL = "proposal"  # an approved proposal applied by the executor (§15)
+    EMERGENCY = "emergency"  # pacing emergency stop (§12.4 step 5)
+    PAUSE_ALL = "pause_all"  # POST /control/pause-all (§17)
+    ROLLBACK = "rollback"  # §15 rollback (evaluator or manual)
+    RESTORE = "restore"  # emergency restore (§12.4 step 6)
+
+
+class WriteRequestKind(StrEnum):
+    """API → engine queue for platform writes the API may not perform itself (0004)."""
+
+    ROLLBACK = "rollback"
+    RESTORE = "restore"
+    PAUSE_ALL = "pause_all"
+
+
 class HistorySource(StrEnum):
     HOURLY_PULL = "hourly_pull"
     EXECUTOR = "executor"

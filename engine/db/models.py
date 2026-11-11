@@ -46,6 +46,7 @@ from engine.enums import (
     AutomationScope,
     BudgetLevel,
     CampaignKind,
+    ChangeOrigin,
     ChangeStatus,
     ConfigKind,
     EmergencyTrigger,
@@ -67,6 +68,7 @@ from engine.enums import (
     Severity,
     SpendDirection,
     Verdict,
+    WriteRequestKind,
 )
 
 
@@ -99,6 +101,9 @@ class Client(Base):
     currency: Mapped[str] = mapped_column(Text)
     mode: Mapped[str] = mapped_column(Text, server_default=Mode.READ_ONLY.value)
     kill_switch: Mapped[bool] = mapped_column(Boolean, server_default=sa_text("false"))
+    # Master switch for platform writes (0004, DECISIONS D-28). Off by default: with it off the
+    # executor never calls a WriteConnector, whatever the mode.
+    execution_enabled: Mapped[bool] = mapped_column(Boolean, server_default=sa_text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now())
 
@@ -450,7 +455,16 @@ class ChangeLog(ClientScoped, Base):
     __tablename__ = "change_log"
     __table_args__ = (
         ck_in("status", ChangeStatus),
+        ck_in("origin", ChangeOrigin),
         Index("ix_change_log_client_applied", "client_id", "applied_at"),
+        # 0004: one write-ahead row per idempotency key (duplicate execution guard, D-27)
+        UniqueConstraint("client_id", "idempotency_key"),
+        Index(
+            "ix_change_log_applying",
+            "client_id",
+            "started_at",
+            postgresql_where=sa_text("status = 'applying'"),
+        ),
     )
 
     id: Mapped[int] = identity_pk()
@@ -469,6 +483,10 @@ class ChangeLog(ClientScoped, Base):
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     applied_by: Mapped[str | None] = mapped_column(Text)
     rollback_of: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("change_log.id"))
+    # 0004 (executor, D-27)
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text, server_default=ChangeOrigin.PROPOSAL.value)
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 class EmergencyAction(ClientScoped, Base):
@@ -686,6 +704,43 @@ class JobRequest(ClientScoped, Base):
     status: Mapped[str] = mapped_column(Text, server_default=JobRequestStatus.QUEUED.value)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class WriteRequest(ClientScoped, Base):
+    """API → engine queue for platform writes (migration 0004, DECISIONS D-29).
+
+    ``POST /changes/{id}/rollback``, ``POST /emergency-actions/{id}/restore`` and
+    ``POST /control/pause-all`` insert ``queued`` rows (role-checked, CSRF, audited); the
+    engine's ``write_requests`` poller (every minute) runs them through the executor, which is
+    the only code holding write credentials (§20). One open request per ``dedupe_key``.
+    """
+
+    __tablename__ = "write_requests"
+    __table_args__ = (
+        ck_in("kind", WriteRequestKind),
+        ck_in("status", JobRequestStatus),
+        Index(
+            "uq_write_requests_open",
+            "client_id",
+            "dedupe_key",
+            unique=True,
+            postgresql_where=sa_text("status IN ('queued', 'running')"),
+        ),
+        Index("ix_write_requests_client_status", "client_id", "status"),
+    )
+
+    id: Mapped[int] = identity_pk()
+    kind: Mapped[str] = mapped_column(Text)
+    dedupe_key: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[int | None] = mapped_column(BigInteger)
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    requested_by: Mapped[str] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now())
+    status: Mapped[str] = mapped_column(Text, server_default=JobRequestStatus.QUEUED.value)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
 
 
