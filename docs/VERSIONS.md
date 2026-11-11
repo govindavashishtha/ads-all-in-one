@@ -9,7 +9,7 @@ versions we want is still `VERIFY-P0`.
 | Item | Value | Where set | Verified? | Doc URL / date |
 |---|---|---|---|---|
 | Meta Marketing API version | _unset_ | `META_API_VERSION` (env) | ☐ | |
-| Google Ads API version | _unset_ (whatever `google-ads==35.0.0` defaults to; pin explicitly in the connector) | `engine/connectors/google_*.py` | ☐ | |
+| Google Ads API version | `v26` (pinned as `GOOGLE_ADS_API_VERSION` in `engine/connectors/google_read.py`; newest version shipped in `google-ads==35.0.0`) | `engine/connectors/google_*.py` | ☐ | |
 | GA4 Data API (optional) | v1beta via `google-analytics-data==0.23.3` | extra `ga4` | ☐ | |
 
 ## Runtime packages (exact pins)
