@@ -182,6 +182,16 @@ class JobStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class JobRequestStatus(StrEnum):
+    """``job_requests.status`` (API → engine manual trigger queue, migration 0003)."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    REJECTED = "rejected"  # not runnable here (unknown job / not allowed) — never ran
+
+
 class SessionKind(StrEnum):
     BROWSER = "browser"
     CLI = "cli"

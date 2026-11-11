@@ -39,6 +39,8 @@ TODAY = dt.date(2026, 11, 11)
 T0 = dt.datetime(2026, 11, 11, 1, 0, tzinfo=dt.UTC)  # 06:30 IST, the morning after as_of
 FIX = synthetic_fixtures(TODAY, 22, days=60, hourly_days=3)
 TABLES = (
+    "system_status",
+    "job_requests",
     "notifications",
     "approvals",
     "proposals",

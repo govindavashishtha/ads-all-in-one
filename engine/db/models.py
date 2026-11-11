@@ -51,6 +51,7 @@ from engine.enums import (
     EmergencyTrigger,
     EntityType,
     HistorySource,
+    JobRequestStatus,
     JobStatus,
     LLMTier,
     Mode,
@@ -654,6 +655,53 @@ class JobRun(ClientScoped, Base):
     status: Mapped[str] = mapped_column(Text)
     rows_ingested: Mapped[int | None] = mapped_column(BigInteger)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class JobRequest(ClientScoped, Base):
+    """Manual job trigger queue (migration 0003, POST /jobs/{name}/run).
+
+    The API inserts ``queued`` rows (admin only, audited, whitelisted names); the engine's
+    ``job_requests`` poller claims them with ``FOR UPDATE SKIP LOCKED`` and runs the job in
+    its own process, so the API never runs engine jobs or holds connector credentials.
+    At most one open (queued/running) request per job (partial unique index).
+    """
+
+    __tablename__ = "job_requests"
+    __table_args__ = (
+        ck_in("status", JobRequestStatus),
+        Index(
+            "uq_job_requests_open",
+            "client_id",
+            "job",
+            unique=True,
+            postgresql_where=sa_text("status IN ('queued', 'running')"),
+        ),
+        Index("ix_job_requests_client_status", "client_id", "status"),
+    )
+
+    id: Mapped[int] = identity_pk()
+    job: Mapped[str] = mapped_column(Text)
+    requested_by: Mapped[str] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now())
+    status: Mapped[str] = mapped_column(Text, server_default=JobRequestStatus.QUEUED.value)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class SystemStatus(ClientScoped, Base):
+    """Engine-process facts the API cannot see directly (migration 0003): the pacing job's
+    latest per-platform projection (``pacing:<platform>``), the heartbeat ping outcome
+    (``heartbeat``) and per-platform API operations used today (``operations:<platform>``).
+    One row per key, overwritten by the engine (latest value only)."""
+
+    __tablename__ = "system_status"
+    __table_args__ = (UniqueConstraint("client_id", "key"),)
+
+    id: Mapped[int] = identity_pk()
+    key: Mapped[str] = mapped_column(Text)
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now())
 
 
 ALL_TABLES: tuple[str, ...] = tuple(sorted(Base.metadata.tables))

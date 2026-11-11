@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 def test_head_has_every_plan_table(migrated_engine: Engine) -> None:
     tables = set(inspect(migrated_engine).get_table_names())
     assert set(ALL_TABLES) <= tables
-    assert len(ALL_TABLES) == 26  # §8.3 + notifications (DECISIONS D-17)
+    assert len(ALL_TABLES) == 28  # §8.3 + notifications (D-17) + job_requests, system_status (0003)
 
 
 def test_models_match_migrations(migrated_engine: Engine) -> None:
