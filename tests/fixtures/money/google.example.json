@@ -1,0 +1,7 @@
+{
+  "synthetic": true,
+  "source": "synthetic example — replace with a recorded read-only response (VERIFY-P0)",
+  "currency": "INR",
+  "budget": {"raw_amount_micros": 500000000, "ui_major": "500.00"},
+  "spend": {"raw_cost_micros": 4200450000, "ui_major": "4200.45"}
+}
