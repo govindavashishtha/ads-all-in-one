@@ -18,15 +18,17 @@ import structlog
 from apscheduler.schedulers.base import BaseScheduler
 
 from engine.config import Settings
-from engine.connectors.factory import ConnectorFactory
+from engine.connectors.factory import COUNTERS, ConnectorFactory
 from engine.db.session import make_engine, make_sessionmaker
 from engine.enums import Severity
 from engine.ingest.alerts import raise_alert
 from engine.jobs.daily import daily_pipeline
 from engine.jobs.ingestion import health_checks, hourly_pull, retention, search_terms
 from engine.jobs.pacing import pacing
+from engine.jobs.requests import process_job_requests
 from engine.jobs.runner import JobContext
 from engine.jobs.weekly import approval_expiry, notify_dispatch, weekly_strategy
+from engine.system_status import operations_key, put_status
 
 log = structlog.get_logger(__name__)
 
@@ -46,6 +48,32 @@ SCHEDULE: dict[str, tuple[Callable[[JobContext], Any], dict[str, Any], int | Non
     "approval_expiry": (approval_expiry, {"minute": "*/15"}, 300),
     "notify_dispatch": (notify_dispatch, {"minute": "*/5"}, 300),
 }
+# Not a §9 job: polls the manual-trigger queue (migration 0003) every minute.
+REQUESTS_JOB = "job_requests"
+
+
+def run_job_requests(ctx: JobContext) -> int:
+    return process_job_requests(ctx, {name: fn for name, (fn, _, _) in SCHEDULE.items()})
+
+
+def publish_operation_counts(ctx: JobContext) -> None:
+    """Copy this process's per-platform API operation counters to ``system_status`` so
+    GET /system can show them (§4.3, §21). Never raises."""
+    try:
+        with ctx.sessions() as s, s.begin():
+            for platform, counter in COUNTERS.items():
+                usage = counter.snapshot()
+                if usage is None:
+                    continue
+                put_status(
+                    s,
+                    ctx.client_id,
+                    operations_key(platform.value),
+                    {"day": usage.day.isoformat(), "used": usage.used, "limit": usage.limit},
+                    ctx.now(),
+                )
+    except Exception:
+        log.exception("job.publish_operations_failed")
 
 
 def _alert_failure(ctx: JobContext, job: str, exc: BaseException, severity: Severity) -> None:
@@ -81,6 +109,8 @@ def make_runner(
                 )
             else:
                 _alert_failure(ctx, job, exc, Severity.WARN)
+        finally:
+            publish_operation_counts(ctx)
 
     return run
 
@@ -127,4 +157,17 @@ def register_ingestion_jobs(scheduler: BaseScheduler, ctx: JobContext) -> list[s
             **kwargs,
         )
         ids.append(job)
+    scheduler.add_job(
+        make_runner(ctx, scheduler, REQUESTS_JOB, run_job_requests),
+        "cron",
+        timezone=ctx.settings.timezone,
+        minute="*",
+        id=REQUESTS_JOB,
+        name=REQUESTS_JOB,
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+    ids.append(REQUESTS_JOB)
     return ids

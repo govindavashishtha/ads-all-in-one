@@ -36,6 +36,8 @@ TODAY = dt.date(2026, 11, 11)
 # 22:10 IST on the fixture "today" (fixture hours 0..22 exist)
 T0 = dt.datetime(2026, 11, 11, 16, 40, tzinfo=dt.UTC)
 DATA_TABLES = (
+    "system_status",
+    "job_requests",
     "notifications",
     "approvals",
     "proposals",
@@ -397,6 +399,14 @@ def test_pacing_alert_only_with_heartbeat(env: dict[str, Any]) -> None:
         res = pacing(ctx, ping=pings.append)
         assert res is not None and res.status is not None
         assert pings == ["https://heartbeat.invalid/ping"]
+        status = {
+            r.key: r.value
+            for r in q(engine, "SELECT key, value FROM system_status WHERE client_id=:c")
+        }
+        assert status["heartbeat"]["last_status"] == "ok" and status["heartbeat"]["configured"]
+        assert status["pacing:meta"]["local_date"] == "2026-11-11"
+        assert status["pacing:meta"]["curve_source"] in ("learned", "linear")
+        assert "projected_eod" in status["pacing:google"]
         alerts = {
             r.dedupe_key: r
             for r in q(
@@ -413,6 +423,16 @@ def test_pacing_alert_only_with_heartbeat(env: dict[str, Any]) -> None:
         # same 15-min slot again: already done, no second ping, alerts stay deduped
         pacing(ctx, ping=pings.append)
         assert len(pings) == 1
+
+        # next slot with a failing ping: the job still succeeds, the failure is recorded
+        def bad_ping(url: str) -> None:
+            raise RuntimeError("monitor down")
+
+        env["clock"].t += dt.timedelta(minutes=15)
+        res2 = pacing(ctx, ping=bad_ping)
+        assert res2 is not None and res2.status is not None and res2.status.value != "failed"
+        [hb] = q(engine, "SELECT value FROM system_status WHERE client_id=:c AND key='heartbeat'")
+        assert hb.value["last_status"] == "failed" and "monitor down" in hb.value["error"]
     finally:
         with engine.begin() as c:
             c.execute(

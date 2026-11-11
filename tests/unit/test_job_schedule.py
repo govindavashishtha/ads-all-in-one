@@ -29,6 +29,7 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
         "weekly_strategy",
         "approval_expiry",
         "notify_dispatch",
+        "job_requests",  # manual-trigger queue poller (migration 0003)
     }
     jobs = {j.id: j for j in sched.get_jobs()}
     assert str(jobs["pacing"].trigger.fields[6]) == "*/15"  # minute field
@@ -46,6 +47,14 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
     assert jobs["approval_expiry"].misfire_grace_time == 300  # §5
     assert str(jobs["approval_expiry"].trigger.fields[6]) == "*/15"
     assert all(j.max_instances == 1 and j.coalesce for j in jobs.values())
+
+
+def test_manual_jobs_are_scheduled_jobs() -> None:
+    from engine.jobs.manual import MANUAL_JOBS
+    from engine.jobs.schedule import SCHEDULE
+
+    assert set(MANUAL_JOBS) <= set(SCHEDULE)
+    assert "retention" not in MANUAL_JOBS and "backfill" not in MANUAL_JOBS
 
 
 def test_daily_steps_fixed_order_and_registration() -> None:

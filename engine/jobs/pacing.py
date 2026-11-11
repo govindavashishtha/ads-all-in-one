@@ -28,6 +28,7 @@ from engine.guardrails.limits_schema import LimitsConfig
 from engine.ingest.alerts import raise_alert
 from engine.jobs.common import active_limits, client_mode, enabled_connectors
 from engine.jobs.runner import JobContext, StepOutcome, StepResult, job_lock, run_step
+from engine.system_status import HEARTBEAT, pacing_key, put_status
 
 log = structlog.get_logger(__name__)
 
@@ -96,6 +97,7 @@ class PlatformPacing:
     daily_cap: Decimal
     monthly_cap: Decimal
     projected_eod: Decimal | None
+    curve_source: str = "linear"  # "learned" (§12.4 step 2) or the h/24 fallback
     warn_reasons: list[str] = field(default_factory=list)
     emergency: list[EmergencyCondition] = field(default_factory=list)
 
@@ -122,6 +124,7 @@ def evaluate_platform(
         daily_cap=cap.daily,
         monthly_cap=cap.monthly,
         projected_eod=None,
+        curve_source="linear" if curve is None else "learned",
     )
     if Decimal(str(elapsed_hours)) >= p.min_elapsed_hours:
         out.projected_eod = project_eod(spend, curve_at(curve, elapsed_hours))
@@ -269,6 +272,8 @@ def pacing(ctx: JobContext, *, ping: Callable[[str], None] | None = None) -> Ste
                 )
             )
         alerts = _raise_pacing_alerts(ctx, s, results, limits, mode)
+        for r in results:
+            put_status(s, ctx.client_id, pacing_key(r.platform.value), snapshot_json(r), now)
         return StepOutcome(
             rows=alerts,
             skipped_reason="; ".join(f"{p.value}: {w}" for p, w in enabled.skipped.items()) or None,
@@ -279,9 +284,54 @@ def pacing(ctx: JobContext, *, ping: Callable[[str], None] | None = None) -> Ste
         if not got:
             return None
         result = run_step(ctx, "pacing", None, window, body)
-    if ctx.settings.heartbeat_url and result.status is not None:
-        (ping or _http_ping)(ctx.settings.heartbeat_url)
+    if result.status is not None:
+        _heartbeat(ctx, ping, now)
     return result
+
+
+def snapshot_json(r: PlatformPacing) -> dict[str, object]:
+    """``system_status['pacing:<platform>']`` — read by GET /overview (projected EOD)."""
+    return {
+        "local_date": r.local_date.isoformat(),
+        "elapsed_hours": round(r.elapsed_hours, 4),
+        "spend_today": str(r.spend_today),
+        "projected_eod": None if r.projected_eod is None else str(r.projected_eod),
+        "daily_cap": str(r.daily_cap),
+        "curve_source": r.curve_source,
+        "warn": bool(r.warn_reasons),
+        "emergency": bool(r.emergency),
+    }
+
+
+def _heartbeat(ctx: JobContext, ping: Callable[[str], None] | None, now: dt.datetime) -> None:
+    """Ping ``HEARTBEAT_URL`` (§21) and publish the outcome for GET /system."""
+    url = ctx.settings.heartbeat_url
+    status = "not_configured"
+    error: str | None = None
+    if url:
+        try:
+            (ping or _http_ping)(url)
+            status = "ok"
+        except Exception as exc:  # a failed ping must never fail the pacing job
+            status, error = "failed", f"{type(exc).__name__}: {exc}"[:500]
+            log.warning("pacing.heartbeat_failed", error=error)
+    try:
+        with ctx.sessions() as s, s.begin():
+            put_status(
+                s,
+                ctx.client_id,
+                HEARTBEAT,
+                {
+                    "configured": bool(url),
+                    "last_status": status,
+                    "last_ping_at": now.isoformat() if url else None,
+                    "last_pacing_run_at": now.isoformat(),
+                    "error": error,
+                },
+                now,
+            )
+    except Exception:
+        log.exception("pacing.heartbeat_status_write_failed")
 
 
 def _raise_pacing_alerts(
@@ -337,7 +387,5 @@ def _raise_pacing_alerts(
 
 
 def _http_ping(url: str) -> None:
-    try:
-        httpx.get(url, timeout=10.0)
-    except httpx.HTTPError as exc:
-        log.warning("pacing.heartbeat_failed", error=str(exc))
+    """Raises on transport errors and non-2xx answers (recorded as ``failed``)."""
+    httpx.get(url, timeout=10.0).raise_for_status()

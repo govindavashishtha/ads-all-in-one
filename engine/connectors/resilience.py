@@ -142,6 +142,13 @@ class OperationCounter:
             OPERATIONS_TODAY.labels(platform=self.platform.value).set(self._used)
             return OperationUsage(self.platform, day, self._used, self.daily_limit)
 
+    def snapshot(self) -> OperationUsage | None:
+        """Usage for the latest day seen (None before the first operation in this process)."""
+        with self._lock:
+            if self._day is None:
+                return None
+            return OperationUsage(self.platform, self._day, self._used, self.daily_limit)
+
     def usage(self, day: dt.date) -> OperationUsage:
         with self._lock:
             used = self._used if day == self._day else 0
