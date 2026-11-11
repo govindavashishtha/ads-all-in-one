@@ -1,8 +1,8 @@
-"""Approval decisions (plan §14 steps 3-5, 7). Called only from authenticated POSTs.
+"""Approval decisions for the API (plan §14 steps 3-5, 7). Called only from authenticated POSTs.
 
-What this does NOT do (by design, until Phase 3): run the executor. An approved proposal
-moves to ``approved``; the executor (Phase 3) must re-run ``guardrails.check(approved=True)``
-with fresh state immediately before applying, and set ``blocked`` if it now blocks (§14.5).
+Thin adapter: the logic lives in ``engine.approvals.service`` (single source of truth, shared
+with the engine's approval jobs and the Phase 3 executor). This module only maps the API's
+``User`` onto it and errors onto HTTP.
 """
 
 from __future__ import annotations
@@ -11,35 +11,26 @@ import datetime as dt
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.auth.adapter import User
-from api.services.queries import audit
-from engine.db.models import Approval, Proposal
-from engine.enums import ProposalStatus
-
-NEXT_STEP_APPROVED = (
-    "recorded; the executor re-runs the guardrail with fresh state before applying "
-    "(executor ships in Phase 3 — nothing is sent to an ad platform yet)"
+from engine.approvals import service
+from engine.approvals.service import (
+    NEXT_STEP_APPROVED,
+    NEXT_STEP_REJECTED,
+    DecisionError,
+    latest_approval,
 )
-NEXT_STEP_REJECTED = "recorded; rejected proposals are never executed"
+from engine.db.models import Proposal
 
-
-class DecisionError(Exception):
-    def __init__(self, status_code: int, detail: str) -> None:
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
-
-
-def latest_approval(db: Session, proposal_id: int) -> Approval | None:
-    return db.scalars(
-        select(Approval)
-        .where(Approval.proposal_id == proposal_id)
-        .order_by(Approval.requested_at.desc(), Approval.id.desc())
-        .limit(1)
-    ).first()
+__all__ = [
+    "NEXT_STEP_APPROVED",
+    "NEXT_STEP_REJECTED",
+    "DecisionError",
+    "as_http",
+    "decide",
+    "latest_approval",
+]
 
 
 def decide(
@@ -54,43 +45,18 @@ def decide(
     ip: str | None,
 ) -> Proposal:
     """Record one decision. Raises DecisionError (404/409). Caller commits."""
-    proposal = db.scalars(
-        select(Proposal)
-        .where(Proposal.id == proposal_id, Proposal.client_id == client_id)
-        .with_for_update()
-    ).one_or_none()
-    if proposal is None:
-        raise DecisionError(404, f"proposal {proposal_id} not found")
-    if proposal.status != ProposalStatus.AWAITING_APPROVAL.value:
-        raise DecisionError(
-            409, f"proposal {proposal_id} is {proposal.status}, not awaiting_approval"
-        )
-    if proposal.expires_at is not None and proposal.expires_at <= now:
-        raise DecisionError(409, f"proposal {proposal_id} expired at {proposal.expires_at}")
-
-    approval = latest_approval(db, proposal_id)
-    if approval is None or approval.decided_at is not None:
-        approval = Approval(client_id=client_id, proposal_id=proposal_id, channel=user.session_kind)
-        db.add(approval)
-    approval.decided_at = now
-    approval.decision = decision
-    approval.decided_by = user.username
-    approval.comment = comment
-    proposal.status = (
-        ProposalStatus.APPROVED.value if decision == "approved" else ProposalStatus.REJECTED.value
-    )
-    audit(
+    return service.decide(
         db,
         client_id=client_id,
+        proposal_id=proposal_id,
+        decision=decision,
         actor=user.username,
-        action=f"proposal.{'approve' if decision == 'approved' else 'reject'}",
-        target=f"proposal:{proposal_id}",
-        payload={"comment": comment, "via": user.session_kind, "role": user.role.value},
+        role=user.role.value,
+        via=user.session_kind,
+        comment=comment,
+        now=now,
         ip=ip,
-        at=now,
     )
-    db.flush()
-    return proposal
 
 
 def as_http(err: DecisionError) -> HTTPException:

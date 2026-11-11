@@ -54,6 +54,8 @@ from engine.enums import (
     JobStatus,
     LLMTier,
     Mode,
+    NotificationKind,
+    NotificationStatus,
     Platform,
     ProposalSource,
     ProposalStatus,
@@ -569,6 +571,37 @@ class Alert(ClientScoped, Base):
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     acked_by: Mapped[str | None] = mapped_column(Text)
+
+
+class Notification(ClientScoped, Base):
+    """Outbox for engine/notify (approval requests/reminders, digests). Added in 0002.
+
+    Producers insert ``queued`` rows (idempotent via ``dedupe_key``); ``engine.notify.dispatch``
+    delivers them on the configured channels and records the outcome. The rendered digest is
+    stored here too (``kind='digest'``), so it doubles as the digest archive.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("client_id", "dedupe_key"),
+        ck_in("kind", NotificationKind),
+        ck_in("status", NotificationStatus),
+        Index("ix_notifications_client_status", "client_id", "status"),
+    )
+
+    id: Mapped[int] = identity_pk()
+    dedupe_key: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    body_text: Mapped[str] = mapped_column(Text)
+    body_html: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    proposal_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proposals.id"))
+    status: Mapped[str] = mapped_column(Text, server_default=NotificationStatus.QUEUED.value)
+    sent_channels: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sa_text("'{}'"))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=sa_text("0"))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Session(ClientScoped, Base):

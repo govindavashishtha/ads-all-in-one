@@ -3,7 +3,6 @@ pages on the dashboard and never act (§14.3)."""
 
 from __future__ import annotations
 
-import hashlib
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,7 +29,9 @@ from api.schemas import (
 from api.services import approvals
 from api.services.queries import audit
 from engine.db.models import Ad, AdGroup, Campaign, Keyword, Proposal
-from engine.enums import Action, EntityType, ProposalSource, ProposalStatus, SpendDirection
+from engine.enums import Action, EntityType, ProposalSource, ProposalStatus
+from engine.proposals import dedupe_key as _engine_dedupe_key
+from engine.proposals import spend_direction as _engine_spend_direction
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -203,22 +204,9 @@ def dry_run(*, proposal_id: int, user: Viewer, db: DbDep, settings: SettingsDep)
     not_enabled("3", "dry-run payloads are built by the executor, which ships in Phase 3")
 
 
-def spend_direction(action: Action, params: dict[str, Any]) -> SpendDirection:
-    """§12.3 definitions."""
-    if action in (Action.PAUSE, Action.ADD_NEGATIVE):
-        return SpendDirection.REDUCING
-    if action is Action.BUDGET_CHANGE:
-        pct = Decimal(str(params["change_pct"]))
-        return SpendDirection.REDUCING if pct < 0 else SpendDirection.INCREASING
-    if action in (Action.ENABLE, Action.NEW_AD, Action.NEW_CAMPAIGN):
-        return SpendDirection.INCREASING
-    return SpendDirection.NEUTRAL
-
-
-def dedupe_key(*parts: object) -> str:
-    """§8.3: sha256(client_id | entity_type | entity_id | action | rule_key-or-source | as_of)."""
-    raw = "|".join(str(p) for p in parts)
-    return hashlib.sha256(raw.encode()).hexdigest()
+# One definition for every producer (engine.proposals); re-exported for existing callers.
+spend_direction = _engine_spend_direction
+dedupe_key = _engine_dedupe_key
 
 
 @router.post("", response_model=ProposalOut, status_code=201)

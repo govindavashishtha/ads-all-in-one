@@ -26,6 +26,7 @@ from engine.jobs.daily import daily_pipeline
 from engine.jobs.ingestion import health_checks, hourly_pull, retention, search_terms
 from engine.jobs.pacing import pacing
 from engine.jobs.runner import JobContext
+from engine.jobs.weekly import approval_expiry, notify_dispatch, weekly_strategy
 
 log = structlog.get_logger(__name__)
 
@@ -40,6 +41,10 @@ SCHEDULE: dict[str, tuple[Callable[[JobContext], Any], dict[str, Any], int | Non
     "daily_pipeline": (daily_pipeline, {"hour": 6, "minute": 0}, None),
     "search_terms": (search_terms, {"hour": 7, "minute": 0}, None),
     "retention": (retention, {"hour": 3, "minute": 0}, None),
+    # Phase 2 (ranking agent)
+    "weekly_strategy": (weekly_strategy, {"day_of_week": "mon", "hour": 7, "minute": 0}, None),
+    "approval_expiry": (approval_expiry, {"minute": "*/15"}, 300),
+    "notify_dispatch": (notify_dispatch, {"minute": "*/5"}, 300),
 }
 
 

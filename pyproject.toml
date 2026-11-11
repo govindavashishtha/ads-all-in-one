@@ -69,7 +69,7 @@ packages = ["engine", "api", "cli", "tests"]
 exclude = ["db/migrations/versions/"]
 
 [[tool.mypy.overrides]]
-module = ["facebook_business.*", "google.ads.*", "google.analytics.*", "simpleeval", "apscheduler.*"]
+module = ["facebook_business.*", "google.ads.*", "google.analytics.*", "simpleeval", "apscheduler.*", "scipy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

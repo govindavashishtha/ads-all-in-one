@@ -115,6 +115,9 @@ class ProposalStatus(StrEnum):
     EXECUTED = "executed"
     EXPIRED = "expired"
     FAILED = "failed"
+    # Rule outcome ``escalate`` (§11): waits for LLM triage (§13). With the LLM disabled /
+    # over budget it stays here and is surfaced to a human (digest + flag_human). Never executed.
+    ESCALATED = "escalated"
 
 
 class Risk(StrEnum):
@@ -187,3 +190,20 @@ class SessionKind(StrEnum):
 class ConfigKind(StrEnum):
     RULES = "rules"
     LIMITS = "limits"
+
+
+class NotificationKind(StrEnum):
+    """Rows in the ``notifications`` outbox (engine/notify)."""
+
+    APPROVAL_REQUEST = "approval_request"
+    APPROVAL_REMINDER = "approval_reminder"
+    APPROVAL_EXPIRED = "approval_expired"
+    APPROVAL_BLOCKED = "approval_blocked"
+    DIGEST = "digest"
+    ALERT = "alert"
+
+
+class NotificationStatus(StrEnum):
+    QUEUED = "queued"
+    SENT = "sent"  # delivered (or logged, for log-only adapters) on >= 1 channel
+    FAILED = "failed"

@@ -4,6 +4,7 @@
     uv run python -m engine.jobs counts
 
 Jobs: hourly_pull, daily_pipeline, backfill, search_terms, retention, health_checks, pacing,
+weekly_strategy, approval_expiry, notify_dispatch,
 all (backfill → hourly_pull → daily_pipeline → search_terms → pacing → health_checks).
 
 ``--fixtures`` replays fixtures through fake transports (no credentials, no network); it is
@@ -32,6 +33,7 @@ from engine.jobs.daily import daily_pipeline
 from engine.jobs.ingestion import backfill, health_checks, hourly_pull, retention, search_terms
 from engine.jobs.pacing import pacing
 from engine.jobs.runner import JobContext
+from engine.jobs.weekly import approval_expiry, notify_dispatch, weekly_strategy
 from engine.logging import configure_logging
 
 COUNT_TABLES = (
@@ -89,8 +91,8 @@ def counts(ctx: JobContext) -> dict[str, int]:
 def _summary(result: Any) -> Any:
     if isinstance(result, list):
         return [_summary(r) for r in result]
-    if result is None:
-        return None
+    if result is None or isinstance(result, dict):
+        return result
     return {
         "job": result.job,
         "step": result.step,
@@ -113,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
             "retention",
             "health_checks",
             "pacing",
+            "weekly_strategy",
+            "approval_expiry",
+            "notify_dispatch",
             "all",
             "counts",
         ],
@@ -131,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
         "retention": lambda: retention(ctx),
         "health_checks": lambda: health_checks(ctx),
         "pacing": lambda: pacing(ctx),
+        "weekly_strategy": lambda: weekly_strategy(ctx),
+        "approval_expiry": lambda: approval_expiry(ctx),
+        "notify_dispatch": lambda: notify_dispatch(ctx),
     }
     out: dict[str, Any] = {}
     if args.job == "all":

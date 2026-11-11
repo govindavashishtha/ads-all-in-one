@@ -2799,7 +2799,8 @@
           "executing",
           "executed",
           "expired",
-          "failed"
+          "failed",
+          "escalated"
         ],
         "title": "ProposalStatus",
         "type": "string"

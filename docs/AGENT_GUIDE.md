@@ -69,6 +69,12 @@ Default local DBs: `ads_autopilot` and `ads_autopilot_test` (user/password `ads`
 - `api.auth.adapter.get_current_user` → `User(username, role, session_kind)`.
 - `engine.llm.client.LLMClient.complete(LLMRequest) -> LLMResponse`.
 
+Phase 2 additions: `engine.approvals.service` (decide / request / remind / expire /
+re-check — the only approvals logic; the API wraps it), `engine.notify` (outbox `enqueue`,
+log-only `deliver_pending`, digest), `engine.guardrails.state.StateBuilder` (DB → state),
+`engine.proposals` (`ProposalDraft`, `dedupe_key`, `spend_direction`), `python -m
+engine.backtest`. Phase 2+ decisions: [DECISIONS.md](DECISIONS.md).
+
 ## Decisions made in Phase 0 where the plan was silent or ambiguous
 
 - ORM models live in `engine/db/` (§6 doesn't name a place); `engine/enums.py`,
@@ -90,6 +96,6 @@ Default local DBs: `ads_autopilot` and `ads_autopilot_test` (user/password `ads`
   empty `meta_conversion_action`) unless `APP_ENV=development`; it always requires
   `HARD_DAILY_CAP`/`HARD_MONTHLY_CAP` and checks every seed cap ≤ HARD (HARD = total).
 - Search-term variables (`cost_30d`, ...) are computed in the `search_terms` job, not stored
-  in `features` (search terms have no stable entity row). **Open:** which `entity_id` an
-  `add_negative` proposal uses — decide in Phase 5 (suggest: latest `search_terms.id`).
+  in `features` (search terms have no stable entity row). `add_negative` proposals use the
+  latest `search_terms.id` as `entity_id` (Phase 2, [DECISIONS.md](DECISIONS.md) D-9).
 - Emergency `change_log.proposal_id` is nullable (emergency / pause-all / rollbacks).

@@ -48,7 +48,7 @@ def test_connector_interfaces_are_abstract_and_access_checked() -> None:
         Dummy(_meta_creds(Access.WRITE))  # type: ignore[abstract]
 
 
-def test_guardrail_signature_exists_but_is_unimplemented() -> None:
+def test_guardrail_signature_and_read_only_block() -> None:
     limits = parse_limits(load_yaml(DEFAULT_LIMITS_PATH))
     entity = guardrails.EntitySnapshot(
         platform=Platform.META,
@@ -90,8 +90,10 @@ def test_guardrail_signature_exists_but_is_unimplemented() -> None:
         risk=Risk.LOW,
         spend_direction=SpendDirection.INCREASING,
     )
-    with pytest.raises(NotImplementedError):
-        guardrails.check(proposal, state)
+    # Phase 2: implemented; read_only blocks first (§12.3 check 1)
+    result = guardrails.check(proposal, state)
+    assert isinstance(result, guardrails.Block)
+    assert result.reason is guardrails.BlockReason.MODE_READ_ONLY
     assert next(iter(guardrails.BlockReason)).value == "mode_read_only"
 
 

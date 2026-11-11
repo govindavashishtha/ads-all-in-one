@@ -26,6 +26,9 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
         "daily_pipeline",
         "search_terms",
         "retention",
+        "weekly_strategy",
+        "approval_expiry",
+        "notify_dispatch",
     }
     jobs = {j.id: j for j in sched.get_jobs()}
     assert str(jobs["pacing"].trigger.fields[6]) == "*/15"  # minute field
@@ -34,6 +37,14 @@ def test_jobs_registered_with_plan_cadences(make_settings) -> None:
     assert str(jobs["hourly_pull"].trigger.fields[6]) == "5"
     daily = jobs["daily_pipeline"].trigger
     assert (str(daily.fields[5]), str(daily.fields[6])) == ("6", "0")
+    weekly = jobs["weekly_strategy"].trigger
+    assert (str(weekly.fields[4]), str(weekly.fields[5]), str(weekly.fields[6])) == (
+        "mon",
+        "7",
+        "0",
+    )
+    assert jobs["approval_expiry"].misfire_grace_time == 300  # §5
+    assert str(jobs["approval_expiry"].trigger.fields[6]) == "*/15"
     assert all(j.max_instances == 1 and j.coalesce for j in jobs.values())
 
 

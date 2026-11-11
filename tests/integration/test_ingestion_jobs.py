@@ -36,6 +36,12 @@ TODAY = dt.date(2026, 11, 11)
 # 22:10 IST on the fixture "today" (fixture hours 0..22 exist)
 T0 = dt.datetime(2026, 11, 11, 16, 40, tzinfo=dt.UTC)
 DATA_TABLES = (
+    "notifications",
+    "approvals",
+    "proposals",
+    "rule_stats",
+    "scores",
+    "features",
     "metrics_hourly",
     "metrics_daily",
     "metrics_window",
@@ -193,12 +199,14 @@ def test_end_to_end_into_postgres_and_idempotent(env: dict[str, Any]) -> None:
     learning = dict(q(engine, "SELECT external_id, learning FROM campaigns WHERE client_id=:c"))
     assert learning["900001"] is True and learning["900002"] is False
     assert learning["800002"] is True and learning["800001"] is False
-    # daily pipeline: ingestion steps ran, later steps recorded as skipped (not success)
+    # daily pipeline: ingestion + Phase 2 steps ran; triage/executor/evaluator still skipped
     steps = dict(
         q(engine, "SELECT step, status FROM job_runs WHERE client_id=:c AND job='daily_pipeline'")
     )
     assert steps["repull"] == "success" and steps["windows"] == "success"
-    assert steps["features"] == "skipped"
+    assert steps["features"] == "success" and steps["score"] == "success"
+    assert steps["rules"] == "success" and steps["digest"] == "success"
+    assert steps["triage"] == "skipped" and steps["execute"] == "skipped"
 
     # re-run the same windows: every completed step is skipped, nothing changes
     second = run_all(ctx)

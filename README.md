@@ -2,8 +2,10 @@
 
 Self-hosted service that pulls Meta Ads and Google Ads data on a schedule, ranks ads with
 confidence-aware scores, enforces budget limits in code, and proposes/applies guarded changes.
-Plan: [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) (v1.1). Status: **Phase 0 foundation** —
-schema, config, interfaces, CI; no connectors, no jobs, no live platform access.
+Plan: [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) (v1.1). Status: **Phase 2 (read-only / suggest)** —
+ingestion, features, ranking, rules, guardrail, approvals, log-only notifications, digest,
+weekly allocation and a backtest (`uv run python -m engine.backtest --out report.md`). No
+writes to ad platforms. Decisions: [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ```bash
 cp .env.example .env    # fill in; never commit .env

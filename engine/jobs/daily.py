@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from engine.jobs.common import client_yesterday
 from engine.jobs.ingestion import repull_step, windows_step
 from engine.jobs.runner import JobContext, StepOutcome, StepResult, job_lock, run_step
+from engine.jobs.scoring_steps import STEPS as SCORING_STEPS
 
 log = structlog.get_logger(__name__)
 
@@ -50,6 +51,8 @@ OWNERS = {
 
 StepFn = Callable[[JobContext, Session], StepOutcome]
 _HANDLERS: dict[str, StepFn] = {"repull": repull_step, "windows": windows_step}
+# Phase 2 (ranking agent): features, score, rules, guardrail, approvals, digest
+_HANDLERS.update(SCORING_STEPS)
 
 
 def _not_implemented(reason: str, _s: Session) -> StepOutcome:

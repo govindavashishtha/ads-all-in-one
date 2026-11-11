@@ -23,8 +23,8 @@ proxy/Caddyfile: /ads-autopilot/api/* → api (prefix stripped); /ads-autopilot/
 |---|---|---|
 | Settings | `engine/config.py` | `Settings`, `get_settings()`; HARD_* ceilings, env kill switch |
 | Shared vocab | `engine/enums.py` | `Platform`, `EntityType`, `Mode`, `Role`, `Action`, statuses |
-| DB | `engine/db/` | SQLAlchemy models for all 25 tables (§8.3), `session.py` |
-| Migrations | `db/` | Alembic, revision `0001` |
+| DB | `engine/db/` | SQLAlchemy models for the 25 §8.3 tables + `notifications` (0002), `session.py` |
+| Migrations | `db/` | Alembic, revisions `0001`, `0002` |
 | Seeding | `engine/bootstrap.py` | `bootstrap(session, settings)` (§7.1) |
 | Credentials | `engine/credentials/` | `get_credentials()`, `CredentialsProvider`, env + remote stub |
 | Connectors | `engine/connectors/base.py`, `money.py` | `ReadConnector`, `WriteConnector`, normalised records, money conversion |
