@@ -29,6 +29,9 @@ def build_scheduler(settings: Settings) -> BackgroundScheduler:
 
 def register_jobs(scheduler: BackgroundScheduler, settings: Settings) -> None:
     """Jobs from §9 are added here by their owners (pacing/approval_expiry use 300 s grace)."""
+    from engine.jobs.schedule import default_context, register_ingestion_jobs
+
+    register_ingestion_jobs(scheduler, default_context(settings))
 
 
 def main() -> None:
