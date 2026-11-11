@@ -17,6 +17,9 @@ from typing import Any
 import structlog
 from apscheduler.schedulers.base import BaseScheduler
 
+from engine.config import Settings
+from engine.connectors.factory import ConnectorFactory
+from engine.db.session import make_engine, make_sessionmaker
 from engine.enums import Severity
 from engine.ingest.alerts import raise_alert
 from engine.jobs.daily import daily_pipeline
@@ -85,6 +88,17 @@ def make_retry(ctx: JobContext, job: str, fn: Callable[[JobContext], Any]) -> Ca
             _alert_failure(ctx, job, exc, Severity.CRITICAL)
 
     return retry
+
+
+def default_context(settings: Settings) -> JobContext:
+    """Production context: real SDK connectors via ``get_credentials`` (read access only)."""
+    engine = make_engine(settings.database_url)
+    return JobContext(
+        settings=settings,
+        engine=engine,
+        sessions=make_sessionmaker(engine),
+        connectors=ConnectorFactory(settings),
+    )
 
 
 def register_ingestion_jobs(scheduler: BaseScheduler, ctx: JobContext) -> list[str]:
