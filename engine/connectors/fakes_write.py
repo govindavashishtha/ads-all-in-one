@@ -37,6 +37,7 @@ from engine.connectors.write_common import (
     PlatformWriteError,
     WriteErrorKind,
     local_budget_problem,
+    require_write_credentials,
 )
 from engine.credentials.base import GoogleCredentials, MetaCredentials, PlatformCredentials
 from engine.enums import Access, EntityType, Platform
@@ -163,7 +164,9 @@ class FakeWriteConnector(WriteConnector):
     platform: ClassVar[Platform] = Platform.META  # overridden per instance below
 
     def __init__(self, fake: FakePlatform, credentials: PlatformCredentials | None = None) -> None:
-        super().__init__(credentials or fake_credentials(fake.platform))
+        creds = credentials or fake_credentials(fake.platform)
+        require_write_credentials(creds, fake.platform)  # same refusal as the real ones
+        super().__init__(creds)
         self.fake = fake
         self.platform = fake.platform  # type: ignore[misc]
 

@@ -414,6 +414,39 @@ def check(  # noqa: PLR0911, PLR0912 (ordered §12.3 checks)
     return Allow(new_budget, budget_detail)
 
 
+def rollback_checks(
+    proposal: ProposalView, state: GuardrailState, *, new_daily_budget: Decimal | None = None
+) -> Allow | Block:
+    """§15 rollback guard: steps 1–4 always, step 9 when the undo increases spend.
+
+    ``proposal`` describes the undo itself (e.g. ``enable`` to undo a pause, a
+    ``budget_change`` whose ``change_pct`` moves the current budget back to the old one) with a
+    privileged source, so the kill switch only lets spend-reducing undos through (step 2).
+    Cooldown, learning, min-ads and the daily change band (5–8) don't apply to an undo
+    (DECISIONS D-33).
+    """
+    p, e = proposal, state.entity
+    direction = derived_direction(p.action, p.params)
+    if state.mode is Mode.READ_ONLY:
+        return Block(BlockReason.MODE_READ_ONLY)
+    if (state.kill_switch_db or state.kill_switch_env) and not (
+        is_privileged(p) and direction is SpendDirection.REDUCING
+    ):
+        return Block(
+            BlockReason.KILL_SWITCH, {"db": state.kill_switch_db, "env": state.kill_switch_env}
+        )
+    if not e.campaign_managed:
+        return Block(BlockReason.NOT_MANAGED, {"campaign_id": e.campaign_id})
+    scope = _scope_problem(p, e, direction)
+    if scope is not None:
+        return Block(BlockReason.UNSUPPORTED_SCOPE, {"why": scope})
+    if direction is SpendDirection.INCREASING:
+        cap = _cap_problem(p, state, new_daily_budget)
+        if cap is not None:
+            return Block(BlockReason.CAP_EXCEEDED, cap)
+    return Allow(new_daily_budget, {"rollback": True})
+
+
 def result_json(
     result: GuardrailResult, *, approved: bool, mode: Mode, checked_at: dt.datetime
 ) -> dict[str, Any]:
