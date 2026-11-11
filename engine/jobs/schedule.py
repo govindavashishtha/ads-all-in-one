@@ -1,0 +1,104 @@
+"""APScheduler wiring for the ingestion-side jobs (plan §5, §9, §21).
+
+Job defaults come from ``engine.main.JOB_DEFAULTS`` (coalesce, max_instances=1, 3600 s grace);
+``pacing`` overrides grace to 300 s. Every job additionally takes a Postgres advisory lock
+(``engine.jobs.runner.job_lock``) so two engine processes never run the same job at once.
+Schedules use the client ``TIMEZONE``. Failures are caught here so the scheduler survives:
+``daily_pipeline`` is retried once after 10 minutes, then a ``critical`` alert is raised;
+other jobs raise a ``warn`` alert (``job_failed:<job>``).
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from collections.abc import Callable
+from typing import Any
+
+import structlog
+from apscheduler.schedulers.base import BaseScheduler
+
+from engine.enums import Severity
+from engine.ingest.alerts import raise_alert
+from engine.jobs.daily import daily_pipeline
+from engine.jobs.ingestion import health_checks, hourly_pull, retention, search_terms
+from engine.jobs.pacing import pacing
+from engine.jobs.runner import JobContext
+
+log = structlog.get_logger(__name__)
+
+RETRY_DELAY = dt.timedelta(minutes=10)  # §9.1
+
+# job id → (callable, cron trigger kwargs, misfire_grace_time override)
+SCHEDULE: dict[str, tuple[Callable[[JobContext], Any], dict[str, Any], int | None]] = {
+    "pacing": (pacing, {"minute": "*/15"}, 300),
+    "hourly_pull": (hourly_pull, {"minute": 5}, None),
+    "health_checks": (health_checks, {"minute": 30}, None),
+    "daily_pipeline": (daily_pipeline, {"hour": 6, "minute": 0}, None),
+    "search_terms": (search_terms, {"hour": 7, "minute": 0}, None),
+    "retention": (retention, {"hour": 3, "minute": 0}, None),
+}
+
+
+def _alert_failure(ctx: JobContext, job: str, exc: BaseException, severity: Severity) -> None:
+    try:
+        with ctx.sessions() as s, s.begin():
+            raise_alert(
+                s,
+                ctx.client_id,
+                dedupe_key=f"job_failed:{job}",
+                severity=severity,
+                kind="job_failed",
+                message=f"job {job} failed: {type(exc).__name__}: {exc}",
+            )
+    except Exception:
+        log.exception("job.alert_failed", job=job)
+
+
+def make_runner(
+    ctx: JobContext, scheduler: BaseScheduler, job: str, fn: Callable[[JobContext], Any]
+) -> Callable[[], None]:
+    def run() -> None:
+        try:
+            fn(ctx)
+        except Exception as exc:
+            log.exception("job.failed", job=job)
+            if job == "daily_pipeline":
+                scheduler.add_job(
+                    make_retry(ctx, job, fn),
+                    "date",
+                    run_date=ctx.now() + RETRY_DELAY,
+                    id=f"{job}_retry",
+                    replace_existing=True,
+                )
+            else:
+                _alert_failure(ctx, job, exc, Severity.WARN)
+
+    return run
+
+
+def make_retry(ctx: JobContext, job: str, fn: Callable[[JobContext], Any]) -> Callable[[], None]:
+    def retry() -> None:
+        try:
+            fn(ctx)
+        except Exception as exc:
+            log.exception("job.retry_failed", job=job)
+            _alert_failure(ctx, job, exc, Severity.CRITICAL)
+
+    return retry
+
+
+def register_ingestion_jobs(scheduler: BaseScheduler, ctx: JobContext) -> list[str]:
+    ids: list[str] = []
+    for job, (fn, cron, grace) in SCHEDULE.items():
+        kwargs: dict[str, Any] = {"id": job, "name": job, "replace_existing": True}
+        if grace is not None:
+            kwargs["misfire_grace_time"] = grace
+        scheduler.add_job(
+            make_runner(ctx, scheduler, job, fn),
+            "cron",
+            timezone=ctx.settings.timezone,
+            **cron,
+            **kwargs,
+        )
+        ids.append(job)
+    return ids
