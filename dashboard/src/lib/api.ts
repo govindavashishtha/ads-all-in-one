@@ -17,6 +17,7 @@ import type {
   DecisionResponse,
   EmergencyAction,
   EntityType,
+  JobRequest,
   LlmUsage,
   LoginResponse,
   MetricsSeries,
@@ -27,7 +28,6 @@ import type {
   RankLevel,
   Rankings,
   SystemStatus,
-  Targets,
   User,
 } from "./types";
 
@@ -166,17 +166,6 @@ export function qs(params: Record<string, string | number | boolean | null | und
   return s ? `?${s}` : "";
 }
 
-/** Parse targets from the active rules body (§11.2 `targets`); nulls if absent. */
-export function targetsFromRules(r: ConfigResponse | null | undefined): Targets {
-  const t = ((r?.active?.body ?? {}) as { targets?: Record<string, unknown> }).targets ?? {};
-  const obj = t.objective;
-  return {
-    objective: obj === "conversions" || obj === "value" || obj === "traffic" ? obj : null,
-    target_cpa: (t.target_cpa as string | number | null | undefined) ?? null,
-    target_roas: (t.target_roas as string | number | null | undefined) ?? null,
-  };
-}
-
 export const api = {
   /* auth */
   async login(username: string, password: string): Promise<LoginResponse> {
@@ -194,7 +183,8 @@ export const api = {
   me: () => call<User>("GET", "/auth/me"),
 
   /* Phase 1 */
-  overview: (range = "7d") => call<Overview>("GET", `/overview${qs({ range })}`),
+  overview: (range = "7d", trendDays = 28) =>
+    call<Overview>("GET", `/overview${qs({ range, trend_days: trendDays })}`),
   campaigns: async (q: { platform?: Platform; managed?: boolean; range?: string } = {}) =>
     unwrapList<Campaign>(await call("GET", `/campaigns${qs({ range: "7d", ...q })}`)),
   campaign: (id: number | string, range = "7d") => call<CampaignDetail>("GET", `/campaigns/${id}${qs({ range })}`),
@@ -213,6 +203,9 @@ export const api = {
   emergencyActions: async (activeOnly = true) =>
     unwrapList<EmergencyAction>(await call("GET", `/emergency-actions${qs({ active_only: activeOnly })}`)),
   system: () => call<SystemStatus>("GET", "/system"),
+  /** Queue a manual job run (admin); the engine scheduler runs it within ~1 minute. */
+  runJob: (name: string) => call<JobRequest>("POST", `/jobs/${encodeURIComponent(name)}/run`),
+  jobRequests: async () => unwrapList<JobRequest>(await call("GET", "/jobs/requests")),
   rules: () => call<ConfigResponse>("GET", "/rules"),
   limits: () => call<ConfigResponse>("GET", "/limits"),
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import { api, targetsFromRules } from "@/lib/api";
+import { api } from "@/lib/api";
+import { targetsFromOverview } from "@/lib/overview";
 import type { KillSwitchState, Mode, Role, Targets, User } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -42,19 +43,18 @@ export function hasRole(user: User | undefined, required: Role): boolean {
 /** Loads the user and client-wide context (currency, timezone, mode, kill switch, targets). */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const me = useApi(() => api.me(), []);
-  const ov = useApi(() => api.overview("7d"), [], { refreshMs: 60_000 });
-  const sys = useApi(() => api.system(), []);
-  const rules = useApi(() => api.rules(), []);
+  // trend_days=1: the session only needs the header facts; the Overview page loads the full view.
+  const ov = useApi(() => api.overview("7d", 1), [], { refreshMs: 60_000 });
   const value: SessionValue = {
     user: me.data,
     clientName: ov.data?.client_name,
     currency: ov.data?.currency,
-    timezone: sys.data?.ad_accounts[0]?.timezone,
+    timezone: ov.data ? (ov.data.platforms.find((p) => p.timezone)?.timezone ?? ov.data.timezone) : undefined,
     mode: ov.data?.mode,
     hardMaxMode: ov.data?.hard_max_mode,
     killSwitch: ov.data?.kill_switch,
     openApprovals: ov.data?.open_approvals,
-    targets: rules.data ? targetsFromRules(rules.data) : undefined,
+    targets: ov.data ? targetsFromOverview(ov.data) : undefined,
     refresh: () => {
       me.reload();
       ov.reload();

@@ -59,7 +59,14 @@ function OverviewBody({ v }: { v: OverviewView }) {
               spend={s.spend_today}
               cap={s.daily_cap}
               currency={cur}
-              sub={s.elapsed_day_fraction != null && s.spent_fraction_today != null ? `${formatPct(s.spent_fraction_today, 0)} spent at ${formatPct(s.elapsed_day_fraction, 0)} of the day` : undefined}
+              sub={[
+                s.elapsed_day_fraction != null && s.spent_fraction_today != null
+                  ? `${formatPct(s.spent_fraction_today, 0)} spent at ${formatPct(s.elapsed_day_fraction, 0)} of the day`
+                  : null,
+                s.projected_eod != null ? `projected end of day ${formatMoney(s.projected_eod, cur)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined}
             />
           ))}
         </CardBody>
@@ -67,10 +74,14 @@ function OverviewBody({ v }: { v: OverviewView }) {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader title="Intraday pace (all accounts)" subtitle="Cumulative spend by account-local hour vs a linear reference to the total daily cap" right={<ExampleTag />} />
+          <CardHeader
+            title="Intraday pace (all accounts)"
+            subtitle={`Cumulative spend by account-local hour vs the ${ov.total.curve_source === "learned" ? "learned intraday curve (last 28 days)" : ov.total.curve_source === "mixed" ? "expected curve (learned where ≥ 14 days of hourly data, else linear)" : "linear h/24 reference (fewer than 14 days of hourly data)"} × daily cap · projected end of day ${ov.total.projected_eod != null ? formatMoney(ov.total.projected_eod, cur) : "— (pacing job has not reported today)"}`}
+            right={<ExampleTag />}
+          />
           <CardBody>
             {v.pace.some((p) => p.actual !== null) ? (
-              <PaceChart data={v.pace} dailyCap={ov.total.daily_cap} currency={cur} />
+              <PaceChart data={v.pace} dailyCap={ov.total.daily_cap} currency={cur} curveSource={ov.total.curve_source} />
             ) : (
               <EmptyState title="No hourly data for today yet">Hourly metrics arrive with the hourly pull (:05 past each hour).</EmptyState>
             )}
@@ -157,7 +168,6 @@ function OverviewBody({ v }: { v: OverviewView }) {
         <KillSwitchBadge state={ks} />
         <Badge>Hard max: {humanize(ov.hard_max_mode)}</Badge>
         <span>Objective: {humanize(targets.objective ?? "not set")}</span>
-        {v.warnings.length > 0 && <span className="text-amber-700">· Partial data: {v.warnings.join("; ")}</span>}
       </div>
     </div>
   );

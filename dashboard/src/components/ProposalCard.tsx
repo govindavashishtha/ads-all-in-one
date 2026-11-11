@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime, formatMoney, humanize, relativeTime } from "@/lib/format";
-import type { Campaign, DecisionResponse, Proposal } from "@/lib/types";
+import type { DecisionResponse, GuardrailResult, Proposal } from "@/lib/types";
 import { EntityLabel } from "./entityNames";
 import { PlatformBadge, RiskBadge, StatusBadge } from "./badges";
 import { Badge, Button, Card } from "./ui";
@@ -20,20 +20,19 @@ export function fmtValue(key: string, v: unknown, currency?: string): string {
   return String(v);
 }
 
-/**
- * before → after rows for the fields a proposal changes. ProposalOut has no before/after
- * (that lives on ChangeOut once executed), so derive it from params / guardrail_result.
- */
-export function diffRows(p: Proposal): { key: string; before: unknown; after: unknown }[] {
-  const params = (p.params ?? {}) as Record<string, unknown>;
-  const g = (p.guardrail_result ?? {}) as Record<string, unknown>;
-  if (p.action === "budget_change") {
-    const after = g.new_budget ?? params.new_budget;
-    if (after !== undefined || params.current_budget !== undefined) return [{ key: "daily_budget", before: params.current_budget, after }];
-  }
-  if (p.action === "pause") return [{ key: "status", before: "ACTIVE", after: "PAUSED" }];
-  if (p.action === "enable") return [{ key: "status", before: "PAUSED", after: "ACTIVE" }];
-  return [];
+/** before → after from the API's `change` (field, before, after; money in major units). */
+export function diffRows(p: Proposal): { key: string; before: unknown; after: unknown; estimate: boolean }[] {
+  const c = p.change;
+  if (!c || c.field === "none") return [];
+  return [{ key: c.field, before: c.before, after: c.after, estimate: !!c.after_is_estimate }];
+}
+
+/** One-line guardrail summary from the typed `guardrail_result`. */
+export function guardrailText(g: GuardrailResult | null | undefined): string | null {
+  if (!g) return null;
+  if (g.result === "block") return `Blocked (${humanize(g.reason ?? "unknown")})`;
+  if (g.result === "needs_approval") return `Needs approval (${(g.reasons ?? []).map(humanize).join(", ") || "—"})`;
+  return "Allowed";
 }
 
 export function ProposalCard({
@@ -46,7 +45,6 @@ export function ProposalCard({
   onSelect,
   onDecided,
   linkToDetail = true,
-  campaigns,
 }: {
   p: Proposal;
   currency?: string;
@@ -57,17 +55,16 @@ export function ProposalCard({
   onSelect?: (v: boolean) => void;
   onDecided?: (r: DecisionResponse) => void;
   linkToDetail?: boolean;
-  campaigns?: Map<number, Campaign>;
 }) {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const awaiting = p.status === "awaiting_approval";
-  const g = (p.guardrail_result ?? {}) as Record<string, unknown>;
+  const g = p.guardrail_result;
   const params = (p.params ?? {}) as Record<string, unknown>;
-  const pct = typeof params.change_pct === "number" ? params.change_pct : null;
-  const camp = p.entity_type === "campaign" ? campaigns?.get(p.entity_id) : undefined;
+  const pctRaw = params.change_pct;
+  const pct = typeof pctRaw === "number" ? pctRaw : typeof pctRaw === "string" && pctRaw.trim() !== "" && !Number.isNaN(Number(pctRaw)) ? Number(pctRaw) : null;
   const [nextStep, setNextStep] = useState<string | null>(null);
 
   async function decide(kind: "approve" | "reject") {
@@ -101,13 +98,13 @@ export function ProposalCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-400">#{p.id}</span>
-            {camp && <PlatformBadge platform={camp.platform} />}
+            {p.platform && <PlatformBadge platform={p.platform} />}
             <span className="font-semibold text-slate-900">
               {humanize(p.action)}
               {pct !== null && ` ${pct > 0 ? "+" : ""}${pct}%`}
             </span>
             <span className="text-slate-500">on</span>
-            <EntityLabel type={p.entity_type} id={p.entity_id} campaigns={campaigns ?? new Map()} />
+            <EntityLabel type={p.entity_type} id={p.entity_id} name={p.entity_name} campaignId={p.campaign_id} campaignName={p.campaign_name} />
             <StatusBadge status={p.status} />
             <RiskBadge risk={p.risk} />
             <Badge tone={p.spend_direction === "increasing" ? "amber" : p.spend_direction === "reducing" ? "green" : "slate"}>
@@ -127,6 +124,7 @@ export function ProposalCard({
                     <span className="tabular-nums text-slate-500 line-through decoration-slate-300">{fmtValue(d.key, d.before, currency)}</span>
                     <span className="mx-1 text-slate-400">→</span>
                     <span className="font-medium tabular-nums text-slate-900">{fmtValue(d.key, d.after, currency)}</span>
+                    {d.estimate && awaiting && <span className="ml-1 text-xs text-slate-400" title="The executor re-runs the guardrail on fresh data before applying">(re-checked before applying)</span>}
                   </div>
                 ))
               )}
@@ -147,10 +145,10 @@ export function ProposalCard({
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             <span>Source: {humanize(p.source)}{p.rule_key ? ` · rule ${p.rule_key}` : ""}</span>
-            {g.result !== undefined && (
-              <span>
-                Guardrail: {humanize(String(g.result))}
-                {g.reason ? ` (${humanize(String(g.reason))}${g.step ? `, step ${String(g.step)}` : ""})` : ""}
+            {g && (
+              <span title={g.detail && typeof g.detail.why === "string" ? g.detail.why : undefined}>
+                Guardrail: {guardrailText(g)}
+                {g.checked_at ? ` · checked ${formatDateTime(g.checked_at, timezone)}` : ""}
               </span>
             )}
             {p.expires_at && awaiting && <span>Expires {relativeTime(p.expires_at)} ({formatDateTime(p.expires_at, timezone)})</span>}

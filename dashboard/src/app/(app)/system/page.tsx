@@ -2,17 +2,15 @@
 
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber, humanize, relativeTime } from "@/lib/format";
-import { heartbeatFromRuns, latestRuns } from "@/lib/jobs";
+import { latestRuns } from "@/lib/jobs";
 import type { JobRun } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { KillSwitchBadge, ModeBadge, PlatformBadge, StatusBadge } from "@/components/badges";
 import { ExampleTag } from "@/components/MockBanner";
-import { useSession } from "@/components/session";
+import { hasRole, useSession } from "@/components/session";
+import { RunJobCard } from "@/components/RunJobCard";
 import { QueryState } from "@/components/states";
 import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Td, Th } from "@/components/ui";
-
-/** Google Ads Explorer access allows 2,880 ops/day (BUILD_PLAN §4.3); the API does not expose the limit. */
-const GOOGLE_EXPLORER_LIMIT = 2880;
 
 function duration(j: JobRun): string {
   if (!j.finished_at) return "running";
@@ -38,8 +36,8 @@ export default function SystemPage() {
       <PageHeader title="System" subtitle="Job health, data freshness, connector status and platform API usage (§21)." right={<ExampleTag />} />
       <QueryState state={q}>
         {(sys) => {
-          const hb = heartbeatFromRuns(sys.latest_job_runs, new Date(sys.server_time));
-          const ops = Object.entries(sys.platform_operations_today ?? {});
+          const hb = sys.heartbeat;
+          const ops = sys.platform_operations;
           return (
             <div className="space-y-6">
               <div className="grid gap-6 lg:grid-cols-3">
@@ -58,17 +56,24 @@ export default function SystemPage() {
                   </CardBody>
                 </Card>
                 <Card>
-                  <CardHeader title="Heartbeat" subtitle="Derived from the last successful pacing run (it pings HEARTBEAT_URL; ping status is not exposed by the API)" />
-                  <CardBody className="space-y-3 text-sm">
-                    {hb.last ? (
-                      <>
-                        <Row k="Last pacing success">{relativeTime(hb.last.finished_at ?? hb.last.started_at)}</Row>
-                        <Row k="At">{formatDateTime(hb.last.finished_at ?? hb.last.started_at, tz)}</Row>
-                        <Row k="Health"><StatusBadge status={hb.healthy ? "healthy" : "stale"} /></Row>
-                      </>
-                    ) : (
-                      <Badge tone="amber">No successful pacing run yet</Badge>
-                    )}
+                  <CardHeader title="Heartbeat" subtitle="The pacing job pings HEARTBEAT_URL after every run (§21 dead-man's switch)" />
+                  <CardBody className="space-y-3 text-sm" data-testid="heartbeat">
+                    <Row k="Health"><StatusBadge status={hb.healthy ? "healthy" : "stale"} /></Row>
+                    <Row k="Last ping">
+                      {hb.last_status === "unknown" ? (
+                        <Badge tone="amber">not reported yet</Badge>
+                      ) : hb.last_status === "not_configured" ? (
+                        <Badge tone="slate">HEARTBEAT_URL not set</Badge>
+                      ) : (
+                        <span>
+                          <StatusBadge status={hb.last_status} /> {hb.last_ping_at ? relativeTime(hb.last_ping_at) : ""}
+                        </span>
+                      )}
+                    </Row>
+                    <Row k="Last pacing success">
+                      {hb.last_pacing_success_at ? `${relativeTime(hb.last_pacing_success_at)} (${formatDateTime(hb.last_pacing_success_at, tz)})` : "never"}
+                    </Row>
+                    {hb.error && <div className="text-xs text-red-600">{hb.error}</div>}
                     <Row k="Server time">{formatDateTime(sys.server_time, tz)}</Row>
                   </CardBody>
                 </Card>
@@ -128,17 +133,15 @@ export default function SystemPage() {
                 <Card>
                   <CardHeader title="Platform API operations today" subtitle="Google alerts at 80% of the access level's daily limit (§4.3)" />
                   <CardBody className="space-y-4 text-sm">
-                    {ops.length === 0 && <span className="text-slate-500">Not recorded yet</span>}
-                    {ops.map(([platform, n]) => {
-                      const limit = platform === "google" ? GOOGLE_EXPLORER_LIMIT : null;
-                      const pct = n != null && limit ? n / limit : null;
+                    {ops.map((o) => {
+                      const pct = o.fraction ?? null;
                       return (
-                        <div key={platform} data-testid={`ops-${platform}`}>
+                        <div key={o.platform} data-testid={`ops-${o.platform}`}>
                           <div className="flex justify-between">
-                            <span className="font-medium">{humanize(platform)}</span>
+                            <span className="font-medium">{humanize(o.platform)}</span>
                             <span className="tabular-nums">
-                              {n == null ? "not recorded" : formatNumber(n)}
-                              {limit ? ` / ${formatNumber(limit)}` : ""}
+                              {o.used == null ? "not recorded today" : formatNumber(o.used)}
+                              {o.limit ? ` / ${formatNumber(o.limit)}` : ""}
                             </span>
                           </div>
                           {pct !== null && (
@@ -146,10 +149,13 @@ export default function SystemPage() {
                               <div className={`h-full rounded-full ${pct >= 0.8 ? "bg-red-500" : "bg-sky-500"}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />
                             </div>
                           )}
+                          <div className="mt-0.5 text-xs text-slate-400">
+                            {o.access_level ?? ""}
+                            {o.updated_at ? ` · reported ${relativeTime(o.updated_at)}` : ""}
+                          </div>
                         </div>
                       );
                     })}
-                    <p className="text-xs text-slate-400">Google limit assumes Explorer access (2,880/day); not returned by the API.</p>
                   </CardBody>
                 </Card>
               </div>
@@ -189,6 +195,14 @@ export default function SystemPage() {
                   </div>
                 )}
               </Card>
+
+              <RunJobCard
+                jobs={sys.manual_jobs}
+                requests={sys.recent_job_requests ?? []}
+                canRun={hasRole(s.user, "admin")}
+                timezone={tz}
+                onQueued={() => q.reload()}
+              />
             </div>
           );
         }}

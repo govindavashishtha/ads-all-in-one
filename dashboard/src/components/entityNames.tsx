@@ -1,32 +1,42 @@
-"use client";
-
 import Link from "next/link";
-import { api } from "@/lib/api";
 import { humanize } from "@/lib/format";
-import type { Campaign, EntityType } from "@/lib/types";
-import { useApi } from "@/lib/useApi";
+import type { EntityType } from "@/lib/types";
 
 /**
- * ProposalOut / ChangeOut carry only entity_type + entity_id (no name, no platform).
- * Campaign names and platforms are resolved from GET /campaigns; other levels show "Ad #id".
+ * Entity name as returned by the API (`entity_name`, `campaign_id`, `campaign_name` on
+ * proposals and changes). Campaign-level rows link to the campaign; lower levels show their
+ * owning campaign underneath.
  */
-export function useCampaignIndex(): Map<number, Campaign> {
-  const q = useApi(() => api.campaigns({ range: "7d" }), []);
-  return new Map((q.data ?? []).map((c) => [c.id, c]));
-}
-
-export function EntityLabel({ type, id, campaigns }: { type: EntityType; id: number; campaigns: Map<number, Campaign> }) {
+export function EntityLabel({
+  type,
+  id,
+  name,
+  campaignId,
+  campaignName,
+}: {
+  type: EntityType;
+  id: number;
+  name?: string | null;
+  campaignId?: number | null;
+  campaignName?: string | null;
+}) {
+  const label = name ?? `${humanize(type)} #${id}`;
   if (type === "campaign") {
-    const c = campaigns.get(id);
     return (
       <Link href={`/campaigns/${id}`} className="font-medium text-slate-800 hover:underline">
-        {c?.name ?? `Campaign #${id}`}
+        {label}
       </Link>
     );
   }
   return (
-    <span className="font-medium text-slate-800">
-      {humanize(type)} #{id}
+    <span className="inline-flex flex-wrap items-baseline gap-x-1">
+      <span className="text-xs text-slate-500">{humanize(type)}</span>
+      <span className="font-medium text-slate-800">{label}</span>
+      {campaignId != null && (
+        <Link href={`/campaigns/${campaignId}`} className="text-xs text-slate-500 hover:underline">
+          ({campaignName ?? `campaign #${campaignId}`})
+        </Link>
+      )}
     </span>
   );
 }

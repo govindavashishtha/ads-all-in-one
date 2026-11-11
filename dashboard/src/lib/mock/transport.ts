@@ -6,8 +6,8 @@
  * routes answer 501 `not_enabled`, and LLM usage reports `llm_enabled: false` before Phase 4.
  */
 import { ApiError, type HttpMethod, type Transport } from "../api";
-import type { Proposal, RankLevel } from "../types";
-import { buildMockDb, mockLlmUsage, mockMetrics, mockOverview, mockRankings, mockRules, mockSystem, type MockDb } from "./data";
+import type { JobRequest, Proposal, RankLevel } from "../types";
+import { buildMockDb, jobRequests, MANUAL_JOBS, mockLlmUsage, mockMetrics, mockOverview, mockRankings, mockRules, mockSystem, type MockDb } from "./data";
 
 const SESSION_KEY = "ads-autopilot:mockSession";
 export const MOCK_PHASE_KEY = "ads-autopilot:mockPhase";
@@ -80,7 +80,8 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
 
   if (method === "GET") {
     if (path === "/auth/me") return { username: "demo", role: "admin", session_kind: "browser", auth_mode: "env (mock)" };
-    if (path === "/overview") return mockOverview(d, q.get("range") ?? "7d");
+    if (path === "/overview") return mockOverview(d, q.get("range") ?? "7d", Number(q.get("trend_days") ?? 28));
+    if (path === "/jobs/requests") return jobRequests;
     if (path === "/system") return mockSystem(d);
     if (path === "/rules") return mockRules(d);
     if (path === "/metrics") return mockMetrics(d, q);
@@ -131,6 +132,13 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
   }
 
   if (method === "POST") {
+    const jm = path.match(/^\/jobs\/([a-z_]+)\/run$/);
+    if (jm) {
+      if (!MANUAL_JOBS.includes(jm[1])) throw new ApiError(404, `unknown job '${jm[1]}'`);
+      const r: JobRequest = { id: 1000 + jobRequests.length, job: jm[1], status: "queued", requested_by: "demo", requested_at: new Date().toISOString(), started_at: null, finished_at: null, error: null };
+      jobRequests.unshift(r);
+      return r;
+    }
     let m = path.match(/^\/proposals\/(\d+)\/(approve|reject)$/);
     if (m) {
       const b = (body ?? {}) as { comment?: string | null; reason?: string };

@@ -5,7 +5,7 @@ import { ApiError, setTransport } from "@/lib/api";
 import type { Proposal } from "@/lib/types";
 import { BudgetGauge } from "@/components/charts/BudgetGauge";
 import { MockBanner } from "@/components/MockBanner";
-import { ProposalCard, diffRows } from "@/components/ProposalCard";
+import { ProposalCard, diffRows, guardrailText } from "@/components/ProposalCard";
 import { QueryState } from "@/components/states";
 
 vi.mock("next/link", () => ({
@@ -35,7 +35,12 @@ const proposal: Proposal = {
   risk: "low",
   spend_direction: "increasing",
   status: "awaiting_approval",
-  guardrail_result: { result: "needs_approval", reason: "mode_suggest", step: 10, new_budget: "2875.00" },
+  guardrail_result: { result: "needs_approval", reasons: ["mode_suggest"], reason: null, approved: false, mode: "suggest", new_daily_budget: "2875.00", checked_at: null, detail: { current: "2500.00" } },
+  entity_name: "Example campaign",
+  platform: "google",
+  campaign_id: 102,
+  campaign_name: "Example campaign",
+  change: { field: "daily_budget", before: "2500.00", after: "2875.00", after_is_estimate: true },
 };
 
 describe("BudgetGauge", () => {
@@ -113,8 +118,18 @@ describe("ProposalCard", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
-  it("derives before → after from params and the guardrail result", () => {
-    expect(diffRows(proposal)).toEqual([{ key: "daily_budget", before: "2500.00", after: "2875.00" }]);
-    expect(diffRows({ ...proposal, action: "pause", params: null })).toEqual([{ key: "status", before: "ACTIVE", after: "PAUSED" }]);
+  it("renders the API-provided before → after", () => {
+    expect(diffRows(proposal)).toEqual([{ key: "daily_budget", before: "2500.00", after: "2875.00", estimate: true }]);
+    const pause = { ...proposal, action: "pause" as const, params: null, change: { field: "status" as const, before: "ACTIVE", after: "paused", after_is_estimate: false } };
+    expect(diffRows(pause)).toEqual([{ key: "status", before: "ACTIVE", after: "paused", estimate: false }]);
+    expect(diffRows({ ...proposal, change: null })).toEqual([]);
+  });
+});
+
+describe("guardrailText", () => {
+  it("summarises the typed guardrail result", () => {
+    expect(guardrailText(proposal.guardrail_result)).toBe("Needs approval (Mode suggest)");
+    expect(guardrailText({ result: "block", reason: "learning_phase", approved: false })).toBe("Blocked (Learning phase)");
+    expect(guardrailText(null)).toBeNull();
   });
 });

@@ -7,13 +7,25 @@ import type { Change } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { ExampleTag } from "@/components/MockBanner";
-import { EntityLabel, useCampaignIndex } from "@/components/entityNames";
+import { EntityLabel } from "@/components/entityNames";
 import { fmtValue } from "@/components/ProposalCard";
 import { hasRole, useSession } from "@/components/session";
 import { QueryState } from "@/components/states";
 import { Badge, Button, Card, EmptyState, PageHeader } from "@/components/ui";
 
 function Diff({ c, currency }: { c: Change; currency?: string }) {
+  if (c.change && c.change.field !== "none") {
+    const d = c.change;
+    return (
+      <div className="text-sm">
+        <span className="text-slate-500">{humanize(d.field)}: </span>
+        <span className="tabular-nums text-slate-500">{fmtValue(d.field, d.before, currency)}</span>
+        <span className="mx-1 text-slate-400">→</span>
+        <span className="font-medium tabular-nums text-slate-900">{fmtValue(d.field, d.after, currency)}</span>
+        {d.after_is_estimate && <span className="ml-2 text-xs text-slate-400">(intended; no read-back yet)</span>}
+      </div>
+    );
+  }
   const keys = [...new Set([...Object.keys(c.before ?? {}), ...Object.keys(c.intended ?? {})])];
   return (
     <div className="space-y-0.5">
@@ -63,7 +75,6 @@ export default function ChangesPage() {
   );
   const [msg, setMsg] = useState<string | null>(null);
   const canRollback = hasRole(s.user, "approver");
-  const campaigns = useCampaignIndex();
 
   async function rollback(c: Change) {
     if (!window.confirm(`Roll back change #${c.id} on ${humanize(c.entity_type)} #${c.entity_id}? If the entity has drifted, a rollback proposal needing approval is created instead.`)) return;
@@ -107,7 +118,7 @@ export default function ChangesPage() {
                         <PlatformBadge platform={c.platform} />
                         <span className="font-semibold text-slate-900">{humanize(c.action)}</span>
                         <span className="text-slate-500">on</span>
-                        <EntityLabel type={c.entity_type} id={c.entity_id} campaigns={campaigns} />
+                        <EntityLabel type={c.entity_type} id={c.entity_id} name={c.entity_name} campaignId={c.campaign_id} campaignName={c.campaign_name} />
                         <StatusBadge status={c.status} />
                         {c.verdict && (
                           <span title="Overall verdict">

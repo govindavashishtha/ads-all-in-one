@@ -418,6 +418,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Job Requests */
+        get: operations["list_job_requests_api_v1_jobs_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job Request */
+        get: operations["get_job_request_api_v1_jobs_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{name}/run": {
         parameters: {
             query?: never;
@@ -429,8 +463,11 @@ export interface paths {
         put?: never;
         /**
          * Run Job
-         * @description Manual job trigger. The scheduler runs in the engine container; the API→engine
-         *     trigger channel is not built yet.
+         * @description Queue a manual run (§17, §19 ``ads run``). The API never runs jobs itself: it inserts a
+         *     ``job_requests`` row that the engine scheduler picks up within about a minute (poll it via
+         *     ``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request
+         *     per job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a
+         *     no-op. Nothing here writes to an ad platform.
          */
         post: operations["run_job_api_v1_jobs__name__run_post"];
         delete?: never;
@@ -656,7 +693,9 @@ export interface paths {
         };
         /**
          * Rankings
-         * @description Rows from the latest ``scores.as_of`` for the level (empty until scoring runs).
+         * @description Rows from the latest ``scores.as_of`` for the level (empty until scoring runs), with
+         *     the settled-window spend/conversions and fatigue flag from ``features`` of the same
+         *     ``as_of``, the owning campaign / direct parent, and the targets they were ranked against.
          */
         get: operations["rankings_api_v1_rankings_get"];
         put?: never;
@@ -930,6 +969,12 @@ export interface components {
             /** Results */
             results: components["schemas"]["DecisionResult"][];
         };
+        /**
+         * BlockReason
+         * @description Block reasons in §12.3 order.
+         * @enum {string}
+         */
+        BlockReason: "mode_read_only" | "kill_switch" | "not_managed" | "unsupported_scope" | "cooldown" | "learning_phase" | "min_active_ads" | "change_too_small" | "cap_exceeded";
         /** CampaignDetail */
         CampaignDetail: {
             /** Ad Account Id */
@@ -1034,8 +1079,15 @@ export interface components {
             before: {
                 [key: string]: unknown;
             } | null;
+            /** Campaign Id */
+            campaign_id?: number | null;
+            /** Campaign Name */
+            campaign_name?: string | null;
+            change?: components["schemas"]["ValueChange"] | null;
             /** Entity Id */
             entity_id: number;
+            /** Entity Name */
+            entity_name?: string | null;
             entity_type: components["schemas"]["EntityType"];
             /** Evaluations */
             evaluations?: components["schemas"]["EvaluationOut"][];
@@ -1208,11 +1260,126 @@ export interface components {
             /** Verdict */
             verdict: string | null;
         };
+        /**
+         * GuardrailResultOut
+         * @description Typed ``proposals.guardrail_result`` (written by ``engine.guardrails.check.result_json``).
+         *
+         *     - ``allow``: may be applied as is (``new_daily_budget`` for budget changes).
+         *     - ``needs_approval``: ``reasons`` (e.g. ``mode_suggest``, ``risk_medium``,
+         *       ``entity_learning``) say why a human must approve.
+         *     - ``block``: ``reason`` is the first failing §12.3 check (``BlockReason``).
+         *
+         *     ``detail`` for budget changes: ``current``, ``start_of_day_budget``,
+         *     ``requested_change_pct``, ``lower_bound``, ``upper_bound``, ``new`` (strings), and ``why``
+         *     when the change was too small; for blocks a ``why`` text.
+         */
+        GuardrailResultOut: {
+            /**
+             * Approved
+             * @default false
+             */
+            approved: boolean;
+            /** Checked At */
+            checked_at?: string | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
+            mode?: components["schemas"]["Mode"] | null;
+            /** New Daily Budget */
+            new_daily_budget?: string | null;
+            reason?: components["schemas"]["BlockReason"] | null;
+            /** Reasons */
+            reasons?: string[];
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "allow" | "needs_approval" | "block";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HeartbeatOut
+         * @description Dead-man's switch (§21): the pacing job pings ``HEARTBEAT_URL`` after each run.
+         */
+        HeartbeatOut: {
+            /**
+             * Configured
+             * @description HEARTBEAT_URL set on the engine (as last reported)
+             */
+            configured: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Healthy
+             * @description pacing succeeded within the last 30 min and the last ping did not fail
+             */
+            healthy: boolean;
+            /**
+             * Last Pacing Success At
+             * @description latest successful `pacing` job_runs row
+             */
+            last_pacing_success_at?: string | null;
+            /** Last Ping At */
+            last_ping_at?: string | null;
+            /**
+             * Last Status
+             * @description outcome of the latest ping; unknown = the engine has not reported yet
+             * @enum {string}
+             */
+            last_status: "ok" | "failed" | "not_configured" | "unknown";
+        };
+        /**
+         * IntradayPoint
+         * @description One account-local hour of today. ``expected_cumulative`` = curve(h+1) × daily cap.
+         */
+        IntradayPoint: {
+            /** Cumulative Spend */
+            cumulative_spend: string | null;
+            /** Expected Cumulative */
+            expected_cumulative: string | null;
+            /** Hour */
+            hour: number;
+            /**
+             * Spend
+             * @description null for hours that have not started yet
+             */
+            spend: string | null;
+        };
+        /**
+         * JobRequestOut
+         * @description A manual job trigger (``job_requests`` row) — run by the engine scheduler, not the API.
+         */
+        JobRequestOut: {
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Job */
+            job: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /** Started At */
+            started_at: string | null;
+            status: components["schemas"]["JobRequestStatus"];
+        };
+        /**
+         * JobRequestStatus
+         * @description ``job_requests.status`` (API → engine manual trigger queue, migration 0003).
+         * @enum {string}
+         */
+        JobRequestStatus: "queued" | "running" | "success" | "failed" | "rejected";
         /** JobRunOut */
         JobRunOut: {
             /** Error */
@@ -1516,12 +1683,22 @@ export interface components {
         OverviewResponse: {
             /** Active Emergency Actions */
             active_emergency_actions: number;
+            /**
+             * Alerts
+             * @description open warn/critical alerts, newest first (max 10)
+             */
+            alerts?: components["schemas"]["AlertOut"][];
             /** Client Id */
             client_id: string;
             /** Client Name */
             client_name: string;
             /** Currency */
             currency: string;
+            /**
+             * Emergency Actions
+             * @description active (not restored) emergency actions
+             */
+            emergency_actions?: components["schemas"]["EmergencyActionOut"][];
             hard_max_mode: components["schemas"]["Mode"];
             kill_switch: components["schemas"]["KillSwitchState"];
             /** Last Synced At */
@@ -1540,7 +1717,20 @@ export interface components {
             platforms: components["schemas"]["SpendBlock"][];
             /** Range Days */
             range_days: number;
+            targets?: components["schemas"]["TargetsOut"] | null;
+            /**
+             * Timezone
+             * @description client timezone (TIMEZONE); accounts may differ
+             */
+            timezone: string;
             total: components["schemas"]["SpendBlock"];
+            /**
+             * Trend
+             * @description last `trend_days` complete days, oldest first
+             */
+            trend?: components["schemas"]["TrendPoint"][];
+            /** Trend Days */
+            trend_days: number;
         };
         /** PauseAllRequest */
         PauseAllRequest: {
@@ -1556,6 +1746,34 @@ export interface components {
          * @enum {string}
          */
         Platform: "meta" | "google";
+        /**
+         * PlatformOperationsOut
+         * @description Platform API operations used today by the engine (§4.3; alert at 80 % of the limit).
+         */
+        PlatformOperationsOut: {
+            /** Access Level */
+            access_level?: string | null;
+            /**
+             * Day
+             * @description account-local day of `used`
+             */
+            day?: string | null;
+            /** Fraction */
+            fraction?: number | null;
+            /**
+             * Limit
+             * @description daily operation limit; null = no fixed limit (Meta)
+             */
+            limit: number | null;
+            platform: components["schemas"]["Platform"];
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Used
+             * @description null until the engine has made a call today
+             */
+            used: number | null;
+        };
         /** ProposalOut */
         ProposalOut: {
             /** Action */
@@ -1566,6 +1784,11 @@ export interface components {
              * Format: date
              */
             as_of: string;
+            /** Campaign Id */
+            campaign_id?: number | null;
+            /** Campaign Name */
+            campaign_name?: string | null;
+            change?: components["schemas"]["ValueChange"] | null;
             /**
              * Created At
              * Format: date-time
@@ -1575,6 +1798,8 @@ export interface components {
             dedupe_key: string;
             /** Entity Id */
             entity_id: number;
+            /** Entity Name */
+            entity_name?: string | null;
             entity_type: components["schemas"]["EntityType"];
             /** Expected Impact */
             expected_impact: {
@@ -1582,16 +1807,14 @@ export interface components {
             } | null;
             /** Expires At */
             expires_at: string | null;
-            /** Guardrail Result */
-            guardrail_result: {
-                [key: string]: unknown;
-            } | null;
+            guardrail_result: components["schemas"]["GuardrailResultOut"] | null;
             /** Id */
             id: number;
             /** Params */
             params: {
                 [key: string]: unknown;
             } | null;
+            platform?: components["schemas"]["Platform"] | null;
             /** Reason */
             reason: string | null;
             /** Risk */
@@ -1609,7 +1832,7 @@ export interface components {
          * ProposalStatus
          * @enum {string}
          */
-        ProposalStatus: "pending" | "blocked" | "awaiting_approval" | "approved" | "rejected" | "executing" | "executed" | "expired" | "failed";
+        ProposalStatus: "pending" | "blocked" | "awaiting_approval" | "approved" | "rejected" | "executing" | "executed" | "expired" | "failed" | "escalated";
         /**
          * RangeMetrics
          * @description Sums over complete account days ``[from_date, to_date]`` (inclusive).
@@ -1660,10 +1883,22 @@ export interface components {
              * Format: date
              */
             as_of: string;
-            /** Campaign Id */
+            /**
+             * Campaign Id
+             * @description owning campaign (itself for campaigns)
+             */
             campaign_id: number | null;
+            /** Campaign Name */
+            campaign_name?: string | null;
             /** Composite */
             composite?: number | null;
+            /**
+             * Conversions
+             * @description features.conversions_s14
+             */
+            conversions?: string | null;
+            /** Conversions 7D */
+            conversions_7d?: string | null;
             /** Cpa P10 */
             cpa_p10?: string | null;
             /** Cpa P90 */
@@ -1684,10 +1919,24 @@ export interface components {
             /** Entity Id */
             entity_id: number;
             entity_type: components["schemas"]["EntityType"];
+            /**
+             * Fatigue Flag
+             * @default false
+             */
+            fatigue_flag: boolean;
+            /** Learning */
+            learning?: boolean | null;
             /** Name */
             name: string | null;
             /** P Beats Target */
             p_beats_target?: number | null;
+            /**
+             * Parent Id
+             * @description direct parent: campaign for ad groups, ad group for ads/keywords
+             */
+            parent_id?: number | null;
+            /** Parent Name */
+            parent_name?: string | null;
             /** Peer Group */
             peer_group?: string | null;
             /** Peer Size */
@@ -1703,6 +1952,13 @@ export interface components {
             roas_p90?: number | null;
             /** Roas Shrunk */
             roas_shrunk?: number | null;
+            /**
+             * Spend
+             * @description spend in the settled scoring window (features.spend_s14)
+             */
+            spend?: string | null;
+            /** Spend 7D */
+            spend_7d?: string | null;
             /** Status */
             status: string | null;
         };
@@ -1713,6 +1969,8 @@ export interface components {
             level: components["schemas"]["EntityType"];
             /** Rows */
             rows: components["schemas"]["RankingRow"][];
+            /** @description objective and targets the scores were ranked against */
+            targets?: components["schemas"]["TargetsOut"] | null;
         };
         /** RejectRequest */
         RejectRequest: {
@@ -1814,10 +2072,19 @@ export interface components {
              * @description 'today' in the ad account's timezone
              */
             account_date: string | null;
+            /**
+             * Curve Source
+             * @description intraday curve behind `intraday[].expected_cumulative`: learned from the last 28 days (§12.4 step 2, ≥ 14 usable days) or the h/24 fallback
+             * @default linear
+             * @enum {string}
+             */
+            curve_source: "learned" | "linear" | "mixed";
             /** Daily Cap */
             daily_cap: string | null;
             /** Elapsed Day Fraction */
             elapsed_day_fraction?: number | null;
+            /** Intraday */
+            intraday?: components["schemas"]["IntradayPoint"][];
             /** Monthly Cap */
             monthly_cap: string | null;
             /** Mtd Fraction */
@@ -1829,11 +2096,26 @@ export interface components {
              * @enum {string}
              */
             platform: "meta" | "google" | "total";
+            /**
+             * Projected Eod
+             * @description pacing job's projected end-of-day spend (§12.4) for `account_date`; null when the pacing job has not run today yet or it is before `min_elapsed_hours`
+             */
+            projected_eod?: string | null;
+            /**
+             * Projected Eod At
+             * @description when the pacing job computed `projected_eod` (UTC)
+             */
+            projected_eod_at?: string | null;
             range: components["schemas"]["RangeMetrics"];
             /** Spend Today */
             spend_today: string;
             /** Spent Fraction Today */
             spent_fraction_today: number | null;
+            /**
+             * Timezone
+             * @description ad account IANA timezone
+             */
+            timezone?: string | null;
         };
         /** SystemResponse */
         SystemResponse: {
@@ -1846,24 +2128,44 @@ export interface components {
             /** Client Id */
             client_id: string;
             hard_max_mode: components["schemas"]["Mode"];
+            heartbeat: components["schemas"]["HeartbeatOut"];
             kill_switch: components["schemas"]["KillSwitchState"];
             /** Latest Job Runs */
             latest_job_runs: components["schemas"]["JobRunOut"][];
-            mode: components["schemas"]["Mode"];
             /**
-             * Platform Operations Today
-             * @description platform API operations used today; null until connectors record it
+             * Manual Jobs
+             * @description job names accepted by POST /jobs/{name}/run
              */
-            platform_operations_today: {
-                [key: string]: number | null;
-            };
+            manual_jobs: string[];
+            mode: components["schemas"]["Mode"];
+            /** Platform Operations */
+            platform_operations: components["schemas"]["PlatformOperationsOut"][];
             /** Recent Failures */
             recent_failures: components["schemas"]["JobRunOut"][];
+            /** Recent Job Requests */
+            recent_job_requests?: components["schemas"]["JobRequestOut"][];
             /**
              * Server Time
              * Format: date-time
              */
             server_time: string;
+        };
+        /**
+         * TargetsOut
+         * @description ``targets`` of the active rules version (§11.2, INPUT I-1). Placeholder values until
+         *     the inputs are confirmed (``inputs_confirmed`` false in the seed).
+         */
+        TargetsOut: {
+            /** Currency */
+            currency?: string | null;
+            /** Objective */
+            objective?: ("conversions" | "value" | "traffic") | null;
+            /** Rules Version */
+            rules_version?: number | null;
+            /** Target Cpa */
+            target_cpa?: string | null;
+            /** Target Roas */
+            target_roas?: string | null;
         };
         /** TokenRequest */
         TokenRequest: {
@@ -1893,6 +2195,35 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * TrendPoint
+         * @description One complete account day (dates are account-local; platforms summed by date).
+         */
+        TrendPoint: {
+            /** Clicks */
+            clicks: number;
+            /** Conv Value */
+            conv_value: string;
+            /** Conversions */
+            conversions: string;
+            /** Cpa */
+            cpa: string | null;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Impressions */
+            impressions: number;
+            /** Roas */
+            roas: number | null;
+            /** Spend */
+            spend: string;
+            /** Spend By Platform */
+            spend_by_platform: {
+                [key: string]: string;
+            };
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1905,6 +2236,28 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * ValueChange
+         * @description Human-readable before → after of one proposal / change (values as display strings;
+         *     money in major units of the client currency).
+         */
+        ValueChange: {
+            /** After */
+            after?: string | null;
+            /**
+             * After Is Estimate
+             * @description true when `after` is the guardrail's clamped value for a proposal that has not been applied yet (the executor re-runs the guardrail before applying)
+             * @default false
+             */
+            after_is_estimate: boolean;
+            /** Before */
+            before?: string | null;
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "daily_budget" | "status" | "negative_keyword" | "creative" | "campaign" | "none";
         };
     };
     responses: never;
@@ -2616,6 +2969,68 @@ export interface operations {
             };
         };
     };
+    list_job_requests_api_v1_jobs_requests_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRequestOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_request_api_v1_jobs_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_job_api_v1_jobs__name__run_post: {
         parameters: {
             query?: never;
@@ -2628,13 +3043,20 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["JobRequestOut"];
                 };
+            };
+            /** @description a request for this job is already queued or running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2820,6 +3242,8 @@ export interface operations {
             query?: {
                 /** @description e.g. 7d, 28d (complete account days) */
                 range?: string;
+                /** @description days in `trend` (complete days) */
+                trend_days?: number;
             };
             header?: never;
             path?: never;

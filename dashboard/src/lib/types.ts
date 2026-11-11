@@ -24,6 +24,9 @@ export type KillSwitchState = S["KillSwitchState"];
 
 export type Overview = S["OverviewResponse"];
 export type SpendBlock = S["SpendBlock"];
+export type TrendPoint = S["TrendPoint"];
+export type IntradayPoint = S["IntradayPoint"];
+export type TargetsOut = S["TargetsOut"];
 export type RangeMetrics = S["RangeMetrics"];
 export type AlertCounts = S["AlertCounts"];
 export type Alert = S["AlertOut"];
@@ -45,6 +48,8 @@ export type Rankings = S["RankingsResponse"];
 export type RankingRow = S["RankingRow"];
 
 export type Proposal = S["ProposalOut"];
+export type GuardrailResult = S["GuardrailResultOut"];
+export type ValueChange = S["ValueChange"];
 export type Approval = S["ApprovalOut"];
 export type DecisionResponse = S["DecisionResponse"];
 export type BatchDecisionResponse = S["BatchDecisionResponse"];
@@ -59,11 +64,15 @@ export type LlmUsageTotals = S["LLMUsageTotals"];
 export type SystemStatus = S["SystemResponse"];
 export type JobRun = S["JobRunOut"];
 export type AdAccount = S["AdAccountOut"];
+export type Heartbeat = S["HeartbeatOut"];
+export type PlatformOperations = S["PlatformOperationsOut"];
+export type JobRequest = S["JobRequestOut"];
 
 export type ConfigResponse = S["ConfigResponse"];
 export type NotEnabledDetail = S["NotEnabledDetail"];
 
-/** Targets parsed from the active rules version (`GET /rules` → active.body.targets, §11.2). */
+/** Objective + targets of the active rules version (§11.2); from `overview.targets` /
+ * `rankings.targets`, or parsed from `GET /rules` (session-wide default). */
 export interface Targets {
   objective: "conversions" | "value" | "traffic" | null;
   target_cpa: Money | null;

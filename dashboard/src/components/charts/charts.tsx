@@ -30,7 +30,17 @@ const tip = (f: TipFormatter) => ({
   contentStyle: { fontSize: 12, borderRadius: 8, borderColor: "#e2e8f0" },
 });
 
-export function PaceChart({ data: rows, dailyCap, currency }: { data: PaceRow[]; dailyCap: Money | null | undefined; currency?: string }) {
+export function PaceChart({
+  data: rows,
+  dailyCap,
+  currency,
+  curveSource = "linear",
+}: {
+  data: PaceRow[];
+  dailyCap: Money | null | undefined;
+  currency?: string;
+  curveSource?: "learned" | "linear" | "mixed";
+}) {
   const cap = toNum(dailyCap);
   const m = (v: unknown) => formatMoney(v as number, currency);
   return (
@@ -42,7 +52,7 @@ export function PaceChart({ data: rows, dailyCap, currency }: { data: PaceRow[];
         <Tooltip {...tip(m)} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Area isAnimationActive={false} type="monotone" dataKey="actual" name="Actual (cumulative)" stroke={C.actual} fill="#0f172a" fillOpacity={0.08} strokeWidth={2} connectNulls={false} />
-        <Line isAnimationActive={false} type="monotone" dataKey="expected" name="Linear reference (h/24 × cap)" stroke={C.expected} strokeDasharray="5 4" dot={false} strokeWidth={2} />
+        <Line isAnimationActive={false} type="monotone" dataKey="expected" name={curveSource === "learned" ? "Expected (learned curve × cap)" : curveSource === "mixed" ? "Expected (curve × cap)" : "Expected (linear h/24 × cap)"} stroke={C.expected} strokeDasharray="5 4" dot={false} strokeWidth={2} />
         {cap !== null && <ReferenceLine ifOverflow="extendDomain" y={cap} stroke={C.target} strokeDasharray="3 3" label={{ value: "Daily cap", fontSize: 11, fill: C.target, position: "insideTopRight" }} />}
       </ComposedChart>
     </ResponsiveContainer>

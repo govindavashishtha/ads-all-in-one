@@ -20,6 +20,9 @@ import type {
   MetricsSeries,
   Overview,
   Platform,
+  GuardrailResult,
+  IntradayPoint,
+  JobRequest,
   Proposal,
   RangeMetrics,
   RankLevel,
@@ -28,6 +31,8 @@ import type {
   Score,
   SpendBlock,
   SystemStatus,
+  TrendPoint,
+  ValueChange,
 } from "../types";
 
 export const MOCK_TZ = "Asia/Kolkata";
@@ -234,6 +239,9 @@ export function buildMockDb(now: Date = new Date()): MockDb {
   const nowH = Math.max(hour + minute / 60, 0.25);
   const todaySpend = { meta: CAPS.meta.daily * 0.97 * curve(nowH), google: CAPS.google.daily * 0.84 * curve(nowH) };
 
+  const gr = (result: "allow" | "needs_approval" | "block", extra: Partial<GuardrailResult> = {}): GuardrailResult => ({
+    result, approved: false, mode: "suggest", checked_at: iso(6 * H, now), reasons: result === "needs_approval" ? ["mode_suggest"] : [], reason: null, new_daily_budget: null, detail: {}, ...extra,
+  });
   const proposal = (p: Partial<Proposal> & Pick<Proposal, "id" | "action" | "entity_type" | "entity_id" | "reason" | "status">): Proposal => ({
     as_of: addDays(today, -1), source: "rule", rule_key: null, params: {}, expected_impact: null, risk: "low", spend_direction: "neutral",
     guardrail_result: null, expires_at: null, created_at: iso(6 * H, now), dedupe_key: `example-${p.id}`, approval: null, ...p,
@@ -241,15 +249,15 @@ export function buildMockDb(now: Date = new Date()): MockDb {
   const awaiting = (id: number, h: number) => ({
     expires_at: iso(-h * H, now),
     approval: { id: 500 + id, proposal_id: id, channel: "email", requested_at: iso((24 - h) * H, now), reminded_at: null, decided_at: null, decision: null, decided_by: null, comment: null },
-    guardrail_result: { result: "needs_approval", reason: "mode_suggest", step: 10 } as Record<string, unknown>,
+    guardrail_result: gr("needs_approval"),
   });
   const proposals: Proposal[] = [
-    proposal({ id: 41, rule_key: "scale_winner", entity_type: "campaign", entity_id: 102, action: "budget_change", params: { change_pct: 15, current_budget: "2500.00" }, expected_impact: { extra_conversions_per_day: "1.2" }, reason: "p_beats_target 0.91 over 14 settled days; spend pace 0.97; frequency 2.1 (< 3.5).", spend_direction: "increasing", status: "awaiting_approval", ...awaiting(41, 18), guardrail_result: { result: "needs_approval", reason: "mode_suggest", step: 10, new_budget: "2875.00" } }),
+    proposal({ id: 41, rule_key: "scale_winner", entity_type: "campaign", entity_id: 102, action: "budget_change", params: { change_pct: 15, current_budget: "2500.00" }, expected_impact: { extra_conversions_per_day: "1.2" }, reason: "p_beats_target 0.91 over 14 settled days; spend pace 0.97; frequency 2.1 (< 3.5).", spend_direction: "increasing", status: "awaiting_approval", ...awaiting(41, 18), guardrail_result: gr("needs_approval", { new_daily_budget: "2875.00", detail: { current: "2500.00" } }) }),
     proposal({ id: 42, rule_key: "kill_loser", entity_type: "ad", entity_id: 104010, action: "pause", expected_impact: { spend_saved_per_day: "310.00" }, reason: "CPA p10 ₹1,640 > 3× target on settled data; 4,800 impressions; live 9 days.", spend_direction: "reducing", status: "awaiting_approval", ...awaiting(42, 20) }),
-    proposal({ id: 43, rule_key: "trim_underperformer", entity_type: "campaign", entity_id: 202, action: "budget_change", params: { change_pct: -15, current_budget: "3000.00" }, expected_impact: { spend_saved_per_day: "450.00" }, reason: "CPA ₹712 vs target ₹500 for 14 days; p_beats_target 0.12.", spend_direction: "reducing", status: "awaiting_approval", ...awaiting(43, 21), guardrail_result: { result: "needs_approval", reason: "mode_suggest", step: 10, new_budget: "2550.00" } }),
+    proposal({ id: 43, rule_key: "trim_underperformer", entity_type: "campaign", entity_id: 202, action: "budget_change", params: { change_pct: -15, current_budget: "3000.00" }, expected_impact: { spend_saved_per_day: "450.00" }, reason: "CPA ₹712 vs target ₹500 for 14 days; p_beats_target 0.12.", spend_direction: "reducing", status: "awaiting_approval", ...awaiting(43, 21), guardrail_result: gr("needs_approval", { new_daily_budget: "2550.00", detail: { current: "3000.00" } }) }),
     proposal({ id: 45, rule_key: "negative_keyword_candidate", entity_type: "search_term", entity_id: 9001, action: "add_negative", params: { term: "free download template", match_type: "PHRASE", ad_group_id: 2020 }, reason: "₹1,920 spent over 30 days, 0 conversions, 64 clicks.", spend_direction: "reducing", status: "awaiting_approval", ...awaiting(45, 22) }),
-    proposal({ id: 44, source: "llm_triage", entity_type: "ad_group", entity_id: 1012, action: "budget_change", params: { change_pct: 10, current_budget: "924.00" }, reason: "Anomaly triage: CPA spike recovered; small increase suggested.", risk: "medium", spend_direction: "increasing", status: "blocked", guardrail_result: { result: "block", reason: "learning_phase", step: 6 } }),
-    proposal({ id: 38, as_of: addDays(today, -3), rule_key: "scale_winner", entity_type: "campaign", entity_id: 201, action: "budget_change", params: { change_pct: 12, current_budget: "1340.00" }, reason: "p_beats_target 0.95; impression share lost to budget 18%.", spend_direction: "increasing", status: "executed", guardrail_result: { result: "allow", new_budget: "1500.00" }, created_at: iso(3 * D, now) }),
+    proposal({ id: 44, source: "llm_triage", entity_type: "ad_group", entity_id: 1012, action: "budget_change", params: { change_pct: 10, current_budget: "924.00" }, reason: "Anomaly triage: CPA spike recovered; small increase suggested.", risk: "medium", spend_direction: "increasing", status: "blocked", guardrail_result: gr("block", { reason: "learning_phase", detail: { why: "ad set is in the learning phase" } }) }),
+    proposal({ id: 38, as_of: addDays(today, -3), rule_key: "scale_winner", entity_type: "campaign", entity_id: 201, action: "budget_change", params: { change_pct: 12, current_budget: "1340.00" }, reason: "p_beats_target 0.95; impression share lost to budget 18%.", spend_direction: "increasing", status: "executed", guardrail_result: gr("allow", { new_daily_budget: "1500.00", approved: true }), created_at: iso(3 * D, now) }),
     proposal({ id: 36, as_of: addDays(today, -4), rule_key: "kill_loser", entity_type: "ad", entity_id: 101021, action: "pause", reason: "CPA p10 above 3× target.", spend_direction: "reducing", status: "rejected", created_at: iso(4 * D, now) }),
   ];
 
@@ -268,6 +276,50 @@ export function buildMockDb(now: Date = new Date()): MockDb {
     change({ id: 13, proposal_id: 29, platform: "google", entity_type: "campaign", entity_id: 202, action: "budget_change", status: "verify_failed", before: { daily_budget: "3200.00" }, intended: { daily_budget: "3000.00" }, after: { daily_budget: "3200.00" }, started_at: iso(15 * D, now), applied_by: "approval:admin" }),
   ];
 
+  // Display fields the API adds (entity_name, platform, campaign, before → after).
+  const ref = (type: EntityType, id: number): { entity_name: string | null; platform: Platform | null; campaign_id: number | null; campaign_name: string | null; status?: string | null; budget?: string | null } => {
+    const campOf = (cid: number) => campaigns.find((c) => c.id === cid);
+    if (type === "campaign") {
+      const c = campOf(id);
+      return { entity_name: c?.name ?? null, platform: c?.platform ?? null, campaign_id: c?.id ?? null, campaign_name: c?.name ?? null, status: c?.status, budget: c?.daily_budget ?? null };
+    }
+    if (type === "ad_group") {
+      const g = adGroups.find((x) => x.id === id);
+      const c = g ? campOf(g.campaign_id) : undefined;
+      return { entity_name: g?.name ?? null, platform: g?.platform ?? null, campaign_id: c?.id ?? null, campaign_name: c?.name ?? null, status: g?.status, budget: g?.daily_budget ?? null };
+    }
+    if (type === "ad") {
+      const a = ads.find((x) => x.id === id);
+      const g = a ? adGroups.find((x) => x.id === a.ad_group_id) : undefined;
+      const c = g ? campOf(g.campaign_id) : undefined;
+      return { entity_name: a ? `${a.name} — ${a.headline}` : null, platform: a?.platform ?? null, campaign_id: c?.id ?? null, campaign_name: c?.name ?? null, status: a?.status };
+    }
+    if (type === "search_term") {
+      const g = adGroups.find((x) => x.platform === "google");
+      const c = g ? campOf(g.campaign_id) : undefined;
+      return { entity_name: "free download template", platform: "google", campaign_id: c?.id ?? null, campaign_name: c?.name ?? null };
+    }
+    return { entity_name: null, platform: null, campaign_id: null, campaign_name: null };
+  };
+  for (const p of proposals) {
+    const r = ref(p.entity_type, p.entity_id);
+    const params = (p.params ?? {}) as Record<string, unknown>;
+    let change: ValueChange | null = null;
+    if (p.action === "budget_change") {
+      const before = (p.guardrail_result?.detail?.current as string | undefined) ?? (params.current_budget as string | undefined) ?? r.budget ?? null;
+      const after = p.guardrail_result?.new_daily_budget ?? (before != null ? money(Number(before) * (1 + Number(params.change_pct ?? 0) / 100)) : null);
+      change = { field: "daily_budget", before, after, after_is_estimate: true };
+    } else if (p.action === "pause") change = { field: "status", before: r.status ?? "ACTIVE", after: "paused", after_is_estimate: false };
+    else if (p.action === "add_negative") change = { field: "negative_keyword", before: null, after: `${params.term} [${String(params.match_type ?? "exact").toLowerCase()}]`, after_is_estimate: false };
+    Object.assign(p, { entity_name: r.entity_name, platform: r.platform, campaign_id: r.campaign_id, campaign_name: r.campaign_name, change });
+  }
+  for (const c of changes) {
+    const r = ref(c.entity_type, c.entity_id);
+    const key = c.before && "daily_budget" in c.before ? "daily_budget" : "status";
+    const change: ValueChange = { field: key, before: String(c.before?.[key] ?? ""), after: String((c.after ?? c.intended)?.[key] ?? ""), after_is_estimate: !c.after };
+    Object.assign(c, { entity_name: r.entity_name, campaign_id: r.campaign_id, campaign_name: r.campaign_name, change });
+  }
+
   const alert = (a: Partial<Alert> & Pick<Alert, "id" | "severity" | "kind" | "message" | "created_at">): Alert => ({ acked_at: null, acked_by: null, dedupe_key: `${a.kind}:${a.id}`, entity_id: null, entity_type: null, last_sent_at: a.created_at, sent_channels: ["email"], ...a });
   const alerts: Alert[] = [
     alert({ id: 301, severity: "critical", kind: "credential_expiring", message: "Example: Google read credential expires in 5 days — re-authorise it in Google Cloud.", created_at: iso(3 * H, now) }),
@@ -284,7 +336,7 @@ let kwStore: { id: number; ad_group_id: number; text: string; match: string; m: 
 
 const KILL = { db: false, effective: false, env_override: false };
 
-export function mockOverview(db: MockDb, range: string): Overview {
+export function mockOverview(db: MockDb, range: string, trendDays = 28): Overview {
   const { hour, minute } = localParts(db.now);
   const days = Number.parseInt(range, 10) || 7;
   const elapsed = (hour + minute / 60) / 24;
@@ -301,11 +353,40 @@ export function mockOverview(db: MockDb, range: string): Overview {
     const today = plats.reduce((a, p) => a + db.todaySpend[p], 0);
     const mtd = (mtdDays > 0 ? series.slice(-mtdDays) : []).reduce((a, p) => a + Number(p.spend), 0) + today;
     const cap = CAPS[platform];
+    // Example intraday curve (same shape the mock spend follows) for the expected line.
+    const curve = (h: number) => Math.pow(h / 24, 1.15);
+    const nowH = Math.max(hour + minute / 60, 0.25);
+    let cum = 0;
+    const intraday: IntradayPoint[] = Array.from({ length: 24 }, (_, h) => {
+      const started = h <= hour;
+      const spend = started ? today * ((curve(Math.min(h + 1, nowH)) - curve(h)) / curve(nowH)) : null;
+      if (spend !== null) cum += spend;
+      return { hour: h, spend: spend === null ? null : money(spend), cumulative_spend: started ? money(cum) : null, expected_cumulative: money(cap.daily * curve(h + 1)) };
+    });
     return {
-      platform, account_date: db.today, spend_today: money(today), daily_cap: money(cap.daily), spent_fraction_today: today / cap.daily,
+      platform, account_date: platform === "total" ? null : db.today, spend_today: money(today), daily_cap: money(cap.daily), spent_fraction_today: today / cap.daily,
       mtd_spend: money(mtd), monthly_cap: money(cap.monthly), mtd_fraction: mtd / cap.monthly, elapsed_day_fraction: elapsed, range: rangeMetrics(series, days),
+      timezone: platform === "total" ? null : MOCK_TZ, curve_source: "learned", intraday,
+      projected_eod: hour >= 2 ? money(today / curve(nowH)) : null, projected_eod_at: hour >= 2 ? iso(6 * 60_000, db.now) : null,
     };
   };
+  const trend: TrendPoint[] = [];
+  for (let i = trendDays; i >= 1; i--) {
+    const date = addDays(db.today, -i);
+    const by: Record<string, string> = {};
+    let imp = 0, clicks = 0, spend = 0, conv = 0, value = 0;
+    for (const plat of ["meta", "google"] as Platform[]) {
+      let ps = 0;
+      for (const c of db.campaigns.filter((x) => x.platform === plat)) {
+        const pt = db.daily.get(`campaign:${c.id}`)!.find((x) => x.date === date);
+        if (!pt) continue;
+        imp += pt.impressions; clicks += pt.clicks; ps += Number(pt.spend); conv += Number(pt.conversions); value += Number(pt.conv_value);
+      }
+      by[plat] = money(ps);
+      spend += ps;
+    }
+    trend.push({ date, impressions: imp, clicks, spend: money(spend), conversions: conv.toFixed(4), conv_value: money(value), cpa: conv > 0 ? money(spend / conv) : null, roas: spend > 0 ? value / spend : null, spend_by_platform: by });
+  }
   const unacked = db.alerts.filter((a) => !a.acked_at);
   const count = (s: string) => unacked.filter((a) => a.severity === s).length;
   return {
@@ -314,6 +395,8 @@ export function mockOverview(db: MockDb, range: string): Overview {
     open_alerts: { critical: count("critical"), warn: count("warn"), info: count("info"), total: unacked.length },
     open_approvals: db.proposals.filter((p) => p.status === "awaiting_approval").length, active_emergency_actions: 0,
     platforms: [block("meta"), block("google")], total: block("total"), range_days: days,
+    timezone: MOCK_TZ, targets: { currency: MOCK_CURRENCY, objective: "conversions", target_cpa: String(TARGET_CPA), target_roas: "3.0", rules_version: 1 },
+    trend_days: trendDays, trend, alerts: unacked.filter((a) => a.severity !== "info"), emergency_actions: [],
   };
 }
 
@@ -358,11 +441,14 @@ export function mockRules(db: MockDb): ConfigResponse {
 }
 
 export function mockRankings(db: MockDb, level: RankLevel, platform?: string): Rankings {
-  type Src = { entity_type: EntityType; id: number; platform: Platform; name: string | null; status: string | null; campaign_id: number | null; score?: Score | null };
+  type Src = { entity_type: EntityType; id: number; platform: Platform; name: string | null; status: string | null; campaign_id: number | null; score?: Score | null; parent_id?: number | null; parent_name?: string | null };
   let src: Src[];
   if (level === "campaign") src = db.campaigns.map((c) => ({ entity_type: "campaign", id: c.id, platform: c.platform, name: c.name, status: c.status, campaign_id: c.id, score: c.score }));
-  else if (level === "ad_group") src = db.adGroups.map((g) => ({ entity_type: "ad_group", id: g.id, platform: g.platform, name: g.name, status: g.status, campaign_id: g.campaign_id, score: g.score }));
-  else if (level === "ad") src = db.ads.map((a) => ({ entity_type: "ad", id: a.id, platform: a.platform, name: `${a.name} — ${a.headline}`, status: a.status, campaign_id: db.adGroups.find((g) => g.id === a.ad_group_id)!.campaign_id, score: a.score }));
+  else if (level === "ad_group") src = db.adGroups.map((g) => ({ entity_type: "ad_group", id: g.id, platform: g.platform, name: g.name, status: g.status, campaign_id: g.campaign_id, score: g.score, parent_id: g.campaign_id, parent_name: db.campaigns.find((c) => c.id === g.campaign_id)?.name ?? null }));
+  else if (level === "ad") src = db.ads.map((a) => {
+    const g = db.adGroups.find((x) => x.id === a.ad_group_id)!;
+    return { entity_type: "ad", id: a.id, platform: a.platform, name: `${a.name} — ${a.headline}`, status: a.status, campaign_id: g.campaign_id, score: a.score, parent_id: g.id, parent_name: g.name };
+  });
   else {
     const asOf = addDays(db.today, -3);
     const items = kwStore.map((k) => {
@@ -371,12 +457,23 @@ export function mockRankings(db: MockDb, level: RankLevel, platform?: string): R
       return { k, c, g, score: scoreFor(k.m, k.id, asOf, `${c.name} › ${g.name} · ${k.match.toLowerCase()}`, 0, 0, 2) };
     });
     rankWithin(items, (x) => x.score.peer_group ?? "");
-    src = items.map(({ k, c, score }) => ({ entity_type: "keyword", id: k.id, platform: "google", name: `[${k.match.toLowerCase()}] ${k.text}`, status: "ENABLED", campaign_id: c.id, score }));
+    src = items.map(({ k, c, g, score }) => ({ entity_type: "keyword", id: k.id, platform: "google", name: `[${k.match.toLowerCase()}] ${k.text}`, status: "ENABLED", campaign_id: c.id, score, parent_id: g.id, parent_name: g.name }));
   }
   if (platform) src = src.filter((s) => s.platform === platform);
-  const rows: RankingRow[] = src.filter((s) => s.score).map((s) => ({ ...s.score!, entity_type: s.entity_type, entity_id: s.id, platform: s.platform, name: s.name, status: s.status, campaign_id: s.campaign_id, as_of: s.score!.as_of }));
+  const campName = (id: number | null) => db.campaigns.find((c) => c.id === id)?.name ?? null;
+  const rows: RankingRow[] = src.filter((s) => s.score).map((s, i) => {
+    const sc = s.score!;
+    const cpa = Number(sc.cpa_shrunk ?? 0);
+    const spend = cpa > 0 ? cpa * (3 + (i % 7)) : 800 + i * 37;
+    return {
+      ...sc, entity_type: s.entity_type, entity_id: s.id, platform: s.platform, name: s.name, status: s.status, campaign_id: s.campaign_id, as_of: sc.as_of,
+      campaign_name: campName(s.campaign_id), parent_id: s.parent_id ?? null, parent_name: s.parent_name ?? null,
+      spend: money(spend), conversions: cpa > 0 ? (spend / cpa).toFixed(4) : "0", spend_7d: money(spend / 2), conversions_7d: cpa > 0 ? (spend / cpa / 2).toFixed(4) : "0",
+      fatigue_flag: s.entity_type === "ad" && i % 9 === 4, learning: false,
+    };
+  });
   rows.sort((a, b) => (a.peer_group ?? "").localeCompare(b.peer_group ?? "") || (a.rank_in_peer ?? 0) - (b.rank_in_peer ?? 0));
-  return { as_of: addDays(db.today, -3), level, rows };
+  return { as_of: addDays(db.today, -3), level, rows, targets: { currency: MOCK_CURRENCY, objective: "conversions", target_cpa: String(TARGET_CPA), target_roas: "3.0", rules_version: 1 } };
 }
 
 export function mockLlmUsage(db: MockDb, range: string): LlmUsage {
@@ -406,6 +503,9 @@ export function mockLlmUsage(db: MockDb, range: string): LlmUsage {
   };
 }
 
+export const MANUAL_JOBS = ["pacing", "hourly_pull", "health_checks", "daily_pipeline", "search_terms", "weekly_strategy", "approval_expiry", "notify_dispatch"];
+export const jobRequests: JobRequest[] = [];
+
 export function mockSystem(db: MockDb): SystemStatus {
   const now = db.now;
   const runs: JobRun[] = [];
@@ -426,6 +526,13 @@ export function mockSystem(db: MockDb): SystemStatus {
   return {
     client_id: "example_client", app_env: "development (mock)", auth_mode: "env", mode: "suggest", hard_max_mode: "suggest", kill_switch: KILL, server_time: now.toISOString(),
     ad_accounts: ACCOUNTS.map((a) => ({ ...a, last_synced_at: iso(7 * 60_000, now) })),
-    latest_job_runs: runs, recent_failures: failures, platform_operations_today: { meta: 241, google: 612 },
+    latest_job_runs: runs, recent_failures: failures,
+    heartbeat: { configured: true, last_status: "ok", last_ping_at: iso(6 * 60_000, now), last_pacing_success_at: iso(6 * 60_000 - 4_000, now), healthy: true, error: null },
+    platform_operations: [
+      { platform: "meta", day: db.today, used: 241, limit: null, fraction: null, access_level: "no fixed daily limit (rate-limited per app/account)", updated_at: iso(6 * 60_000, now) },
+      { platform: "google", day: db.today, used: 612, limit: 2880, fraction: 612 / 2880, access_level: "explorer (assumed until Basic access is confirmed, VERIFY-P0 V-1)", updated_at: iso(6 * 60_000, now) },
+    ],
+    manual_jobs: MANUAL_JOBS,
+    recent_job_requests: jobRequests,
   };
 }

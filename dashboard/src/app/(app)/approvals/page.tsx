@@ -5,7 +5,6 @@ import { api, ApiError } from "@/lib/api";
 import type { Proposal, ProposalStatus } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { ExampleTag } from "@/components/MockBanner";
-import { useCampaignIndex } from "@/components/entityNames";
 import { ProposalCard } from "@/components/ProposalCard";
 import { hasRole, useSession } from "@/components/session";
 import { QueryState } from "@/components/states";
@@ -27,7 +26,6 @@ export default function ApprovalsPage() {
   const [busy, setBusy] = useState(false);
   const q = useApi(() => api.proposals(tab === "all" ? undefined : tab), [tab]);
   const canDecide = hasRole(s.user, "approver");
-  const campaigns = useCampaignIndex();
 
   async function approveSelected() {
     setBusy(true);
@@ -98,7 +96,6 @@ export default function ApprovalsPage() {
                     setSelected(n);
                   }}
                   onDecided={onDecided}
-                  campaigns={campaigns}
                 />
               ))}
             </div>

@@ -6,7 +6,6 @@ import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { Proposal } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
-import { useCampaignIndex } from "@/components/entityNames";
 import { ProposalCard } from "@/components/ProposalCard";
 import { hasRole, useSession } from "@/components/session";
 import { QueryState } from "@/components/states";
@@ -22,7 +21,6 @@ export default function ApprovalDetailPage() {
   const q = useApi(() => api.proposal(Number(id)), [id]);
   const [decided, setDecided] = useState<Proposal | null>(null);
   const [dry, setDry] = useState<string | null>(null);
-  const campaigns = useCampaignIndex();
 
   async function loadDryRun() {
     try {
@@ -50,7 +48,6 @@ export default function ApprovalDetailPage() {
               currency={s.currency}
               timezone={s.timezone}
               canDecide={hasRole(s.user, "approver")}
-              campaigns={campaigns}
               onDecided={(r) => {
                 setDecided(r.proposal);
                 s.refresh();
