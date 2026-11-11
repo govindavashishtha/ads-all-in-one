@@ -113,3 +113,64 @@ Nothing here sets a business input (targets, caps, accounts, opt-ins); those sta
   entity state, active rules/limits from the DB, guardrail in `read_only` plus a shadow
   `suggest` run (`--assume-managed` optional). No writes. See the limitations section of
   [backtest-synthetic.md](backtest-synthetic.md).
+
+## Phase 4 — LLM layer (§13)
+
+- **D-20 LLM key.** `engine.credentials` is the platform-credentials seam (lead-owned), so the
+  `LLM_API_KEY` `SecretStr` is unwrapped only inside the provider adapter that sends it
+  (`engine/llm/providers.py`) and never logged.
+- **D-21 Triaged escalations keep status `escalated`.** No new proposal status (that would
+  change the OpenAPI enum and the dashboard). The result is recorded in `params.triage`
+  (`outcome` = `proposal`/`noop`/`flag_human`, `action`, `confidence`, `llm_call_id`,
+  `proposal_id`, `cause`), which also makes the step idempotent. LLM proposals have
+  `rule_key = NULL` (dedupe by source), `source = llm_triage | llm_analyst`, `risk = medium`,
+  `params = {change_pct?, escalation_id, llm_call_id}`. Daily triage only takes escalations of
+  the run's `as_of`; fatigue escalations (rule `reason: fatigue`) are left to the weekly
+  creative step (last 7 days).
+- **D-22 Priority near a cap (§13.3).** Lower priorities may only use a share of each cap:
+  triage 100 %, analyst 90 %, digest 80 %, search terms 75 %, creative 70 %.
+- **D-23 Engine-side guards on model answers.** Per-case `allowed_actions` excludes `pause` /
+  `budget_change` where the guardrail would block anyway (campaign_only children, learning ad
+  groups/campaigns, unmanaged campaigns, non-budget units, shared budgets). A `pause` or
+  `budget_change` with confidence < 0.5 becomes `flag_human`. Duplicate or missing results for a
+  case → `flag_human`; any invalid item marks the ledger row `invalid_output` (never cached).
+- **D-24 Enabling the LLM without new env keys.** `.env.example` must equal plan §7.2 exactly,
+  so there is no `LLM_ENABLED` / `LLM_BASE_URL`: `LLM_PROVIDER` empty = disabled;
+  `anthropic[:base]`, `openai[:base]` (https only), or `fake` (development only). A real provider
+  without key, both models and all four prices stays disabled (alerts, `flag_human`).
+- **D-25 Ledger semantics.** `llm_calls` holds provider calls only (`ok`, `invalid_output`,
+  `error`); 24 h cache hits and budget skips write no row (a skip raises one `llm_cap` warn
+  alert per client-timezone day). `result_ref` stores the raw response text of `ok` rows for the
+  `prompt_hash` cache. Cached input tokens are charged at the full input price (upper bound).
+  The pre-call estimate is chars ÷ 3 + `max_output_tokens`. Check + call + insert run in one
+  transaction under a Postgres advisory lock; `created_at` comes from the job clock.
+- **D-26 Creative drafts.** One `new_ad` proposal per ad group (`entity_type = ad_group`),
+  `source = llm_analyst` (the enum has no creative source), `risk = high` so it needs approval
+  in every mode regardless of `approval_required_for`, `params.create_status = PAUSED`,
+  `params.drafts[] = {replaces_ad_id, escalation_ids, variants[{headline, body}]}`. Limits:
+  headline ≤ 30, body ≤ 90 characters (Google RSA; VERIFY-P0 in Phase 5), ≤ 3 variants, no
+  links/markup.
+
+## Integration pass (API ↔ engine ↔ dashboard)
+Ids use the `D-INT-` prefix so they never collide with phase decisions.
+- **D-INT-1 `system_status` key/value table (0003).** Engine-only facts the API needs (pacing
+  snapshot per platform, heartbeat result, per-platform operation counts) are upserted as JSONB
+  under `(client_id, key)` (`pacing:<platform>`, `heartbeat`, `operations:<platform>`). The API
+  never calls connectors or the heartbeat URL itself.
+- **D-INT-2 Projected EOD only from a same-day snapshot.** `projected_eod` is the pacing job's
+  last value for the account's current local date; otherwise `null` (no API-side guess). The
+  expected cumulative line uses the same `load_curve`/`curve_at` functions as the pacing job;
+  the total block is the daily-cap-weighted mix of the platform curves.
+- **D-INT-3 Typed display fields.** Proposals/changes carry `entity_name`, `platform`,
+  campaign, a `change {field, before, after, after_is_estimate}` and a typed
+  `guardrail_result`; the dashboard does no name lookups or param parsing.
+- **D-INT-4 API → engine trigger = queue table.** `POST /jobs/{name}/run` (admin, audited)
+  inserts a `job_requests` row; a partial unique index allows one open request per job (409).
+  The engine polls every minute (`FOR UPDATE SKIP LOCKED`), re-checks the `MANUAL_JOBS`
+  whitelist (else `rejected`), runs the job through the normal runner (advisory lock +
+  `job_runs` idempotency, so a manual run of an already-completed window is a no-op), and fails
+  requests stuck `running` > 6 h. Phase 3/4 jobs stay 501; `retention`/`backfill` are CLI-only.
+- **D-INT-5 Proxy trust and root path.** uvicorn trusts `X-Forwarded-*` only from the pinned
+  proxy IP and runs with `--root-path /ads-autopilot` so `/api/v1/docs` works behind the
+  prefix-stripping proxy. Cookies stay `Secure` (HTTPS required except `localhost`).
+
