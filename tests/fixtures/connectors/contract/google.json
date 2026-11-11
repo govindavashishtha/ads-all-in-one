@@ -1,0 +1,329 @@
+{
+ "_note": "HAND-WRITTEN in the documented response shape (not a live recording). Replace with recorded read-only responses at Phase 0 (VERIFIED.md P-4); keep the asserted values.",
+ "ad_groups": [
+  {
+   "ad_group": {
+    "id": "7001",
+    "name": "AG",
+    "status": "ENABLED",
+    "type": "SEARCH_STANDARD"
+   },
+   "campaign": {
+    "id": "5001"
+   }
+  }
+ ],
+ "ads": [
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "ad_group_ad": {
+    "ad": {
+     "id": "8001",
+     "name": "",
+     "responsive_search_ad": {
+      "descriptions": [
+       {
+        "text": "D1"
+       }
+      ],
+      "headlines": [
+       {
+        "text": "H1"
+       },
+       {
+        "text": "H2"
+       }
+      ]
+     },
+     "type": "RESPONSIVE_SEARCH_AD"
+    },
+    "status": "ENABLED"
+   }
+  }
+ ],
+ "campaigns": [
+  {
+   "campaign": {
+    "advertising_channel_type": "SEARCH",
+    "bidding_strategy_system_status": "LEARNING_NEW",
+    "bidding_strategy_type": "TARGET_CPA",
+    "id": "5001",
+    "name": "Search",
+    "status": "ENABLED"
+   },
+   "campaign_budget": {
+    "amount_micros": "500000000",
+    "explicitly_shared": false,
+    "id": "6001",
+    "period": "DAILY",
+    "total_amount_micros": "0"
+   }
+  },
+  {
+   "campaign": {
+    "advertising_channel_type": "SEARCH",
+    "bidding_strategy_system_status": "ENABLED",
+    "id": "5002",
+    "name": "Shared",
+    "status": "PAUSED"
+   },
+   "campaign_budget": {
+    "amount_micros": "1234560000",
+    "explicitly_shared": true,
+    "id": "6002",
+    "period": "DAILY"
+   }
+  },
+  {
+   "campaign": {
+    "advertising_channel_type": "PERFORMANCE_MAX",
+    "bidding_strategy_system_status": "UNSPECIFIED",
+    "id": "5003",
+    "name": "PMax",
+    "status": "ENABLED"
+   },
+   "campaign_budget": {
+    "amount_micros": "2000000000",
+    "explicitly_shared": false,
+    "id": "6003",
+    "period": "DAILY"
+   }
+  },
+  {
+   "campaign": {
+    "advertising_channel_type": "DEMAND_GEN",
+    "bidding_strategy_system_status": "LIMITED_BY_BUDGET",
+    "id": "5004",
+    "name": "DemandGen",
+    "status": "REMOVED"
+   },
+   "campaign_budget": {
+    "amount_micros": "0",
+    "explicitly_shared": false,
+    "id": "6004",
+    "period": "DAILY"
+   }
+  }
+ ],
+ "change_events": [
+  {
+   "change_event": {
+    "campaign": "customers/0000000001/campaigns/5001",
+    "change_date_time": "2026-11-11 10:00:00.123456",
+    "change_resource_type": "CAMPAIGN",
+    "changed_fields": "status",
+    "client_type": "GOOGLE_ADS_WEB_CLIENT",
+    "new_resource": {
+     "campaign": {
+      "status": "ENABLED"
+     }
+    },
+    "old_resource": {
+     "campaign": {
+      "status": "PAUSED"
+     }
+    },
+    "user_email": "fixture@example.invalid"
+   }
+  },
+  {
+   "change_event": {
+    "campaign": "customers/0000000001/campaigns/5001",
+    "change_date_time": "2026-11-11 11:00:00",
+    "change_resource_type": "CAMPAIGN_BUDGET",
+    "changed_fields": "amount_micros",
+    "client_type": "GOOGLE_ADS_API",
+    "new_resource": {
+     "campaign_budget": {
+      "amount_micros": "500000000"
+     }
+    },
+    "old_resource": {
+     "campaign_budget": {
+      "amount_micros": "400000000"
+     }
+    },
+    "user_email": "fixture@example.invalid"
+   }
+  },
+  {
+   "change_event": {
+    "change_date_time": "2026-11-11 11:00:00",
+    "change_resource_name": "customers/0000000001/adGroupAds/7001~8001",
+    "change_resource_type": "AD_GROUP_AD",
+    "changed_fields": "status",
+    "new_resource": {
+     "ad_group_ad": {
+      "status": "PAUSED"
+     }
+    },
+    "old_resource": {
+     "ad_group_ad": {
+      "status": "ENABLED"
+     }
+    }
+   }
+  },
+  {
+   "change_event": {
+    "change_date_time": "2026-11-11 11:00:00",
+    "change_resource_type": "ASSET",
+    "changed_fields": "name"
+   }
+  }
+ ],
+ "customer": [
+  {
+   "customer": {
+    "currency_code": "INR",
+    "descriptive_name": "Contract Google",
+    "id": "0000000001",
+    "status": "ENABLED",
+    "time_zone": "Asia/Kolkata"
+   }
+  }
+ ],
+ "daily_account": [
+  {
+   "customer": {
+    "id": "0000000001"
+   },
+   "metrics": {
+    "clicks": "40",
+    "conversions": 2.5,
+    "conversions_value": 1234.567,
+    "cost_micros": "4200450000",
+    "impressions": "2000"
+   },
+   "segments": {
+    "date": "2026-11-09"
+   }
+  }
+ ],
+ "daily_ad": [
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "ad_group_ad": {
+    "ad": {
+     "id": "8001"
+    }
+   },
+   "metrics": {
+    "clicks": "1",
+    "conversions": 0.0,
+    "conversions_value": 0.0,
+    "cost_micros": "990000",
+    "impressions": "10",
+    "video_trueview_views": "0"
+   },
+   "segments": {
+    "date": "2026-11-09"
+   }
+  }
+ ],
+ "daily_ad_group": [],
+ "daily_campaign": [
+  {
+   "campaign": {
+    "id": "5001"
+   },
+   "metrics": {
+    "clicks": "0",
+    "cost_micros": "1500000",
+    "impressions": "1"
+   },
+   "segments": {
+    "date": "2026-11-11"
+   }
+  }
+ ],
+ "daily_keyword": [
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "ad_group_criterion": {
+    "criterion_id": "9001"
+   },
+   "metrics": {
+    "clicks": "1",
+    "cost_micros": "990000",
+    "impressions": "10"
+   },
+   "segments": {
+    "date": "2026-11-09"
+   }
+  }
+ ],
+ "hourly_account": [
+  {
+   "customer": {
+    "id": "0000000001"
+   },
+   "metrics": {
+    "clicks": "1",
+    "cost_micros": "12340000",
+    "impressions": "5"
+   },
+   "segments": {
+    "date": "2026-11-11",
+    "hour": 13
+   }
+  }
+ ],
+ "hourly_campaign": [],
+ "keywords": [
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "ad_group_criterion": {
+    "criterion_id": "9001",
+    "keyword": {
+     "match_type": "PHRASE",
+     "text": "running shoes"
+    },
+    "negative": false,
+    "status": "ENABLED"
+   }
+  },
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "ad_group_criterion": {
+    "criterion_id": "9002",
+    "keyword": {
+     "match_type": "BROAD",
+     "text": "free"
+    },
+    "negative": true,
+    "status": "ENABLED"
+   }
+  }
+ ],
+ "search_terms": [
+  {
+   "ad_group": {
+    "id": "7001"
+   },
+   "metrics": {
+    "clicks": "1",
+    "conversions": 0.0,
+    "conversions_value": 0.0,
+    "cost_micros": "450000",
+    "impressions": "3"
+   },
+   "search_term_view": {
+    "search_term": "cheap running shoes"
+   },
+   "segments": {
+    "date": "2026-11-09"
+   }
+  }
+ ]
+}

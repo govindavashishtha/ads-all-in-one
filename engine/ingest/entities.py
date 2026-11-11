@@ -29,6 +29,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -466,7 +467,7 @@ def _latest_history(
         .order_by(
             EntityHistory.entity_id, EntityHistory.observed_at.desc(), EntityHistory.id.desc()
         )
-        .distinct(EntityHistory.entity_id)
+        .ext(distinct_on(EntityHistory.entity_id))
     )
     return {h.entity_id: h for h in session.scalars(stmt)}
 

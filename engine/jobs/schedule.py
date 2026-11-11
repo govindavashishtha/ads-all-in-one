@@ -30,6 +30,7 @@ from engine.jobs.runner import JobContext
 log = structlog.get_logger(__name__)
 
 RETRY_DELAY = dt.timedelta(minutes=10)  # §9.1
+DEFAULT_GRACE_S = 3600  # §5
 
 # job id → (callable, cron trigger kwargs, misfire_grace_time override)
 SCHEDULE: dict[str, tuple[Callable[[JobContext], Any], dict[str, Any], int | None]] = {
@@ -104,9 +105,15 @@ def default_context(settings: Settings) -> JobContext:
 def register_ingestion_jobs(scheduler: BaseScheduler, ctx: JobContext) -> list[str]:
     ids: list[str] = []
     for job, (fn, cron, grace) in SCHEDULE.items():
-        kwargs: dict[str, Any] = {"id": job, "name": job, "replace_existing": True}
-        if grace is not None:
-            kwargs["misfire_grace_time"] = grace
+        kwargs: dict[str, Any] = {
+            "id": job,
+            "name": job,
+            "replace_existing": True,
+            # explicit (= §5 defaults) so they hold even if the scheduler's defaults change
+            "coalesce": True,
+            "max_instances": 1,
+            "misfire_grace_time": grace if grace is not None else DEFAULT_GRACE_S,
+        }
         scheduler.add_job(
             make_runner(ctx, scheduler, job, fn),
             "cron",

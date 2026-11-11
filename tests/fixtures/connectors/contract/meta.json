@@ -1,0 +1,235 @@
+{
+ "_conversion_action": "offsite_conversion.fb_pixel_purchase",
+ "_note": "HAND-WRITTEN in the documented response shape (not a live recording). Replace with recorded read-only responses at Phase 0 (VERIFIED.md P-4); keep the asserted values.",
+ "_synthetic": true,
+ "account": {
+  "account_status": 1,
+  "currency": "INR",
+  "id": "act_000000000001",
+  "name": "Contract Meta",
+  "timezone_name": "Asia/Kolkata"
+ },
+ "activities": [
+  {
+   "actor_name": "Govinda (fixture)",
+   "application_name": "Ads Manager",
+   "event_time": "2026-11-11T10:00:00+0530",
+   "event_type": "update_campaign_run_status",
+   "extra_data": "{\"old_value\": \"ACTIVE\", \"new_value\": \"PAUSED\"}",
+   "object_id": "1001",
+   "object_type": "CAMPAIGN"
+  },
+  {
+   "actor_name": "Govinda (fixture)",
+   "application_name": "Ads Manager",
+   "event_time": "2026-11-11T11:00:00+0530",
+   "event_type": "update_ad_set_budget",
+   "extra_data": "{\"old_value\": 100000, \"new_value\": 123456}",
+   "object_id": "2002",
+   "object_type": "ADSET"
+  },
+  {
+   "event_time": "2026-11-11T11:00:00+0530",
+   "event_type": "ad_review_approved",
+   "object_id": "3001"
+  }
+ ],
+ "ads": [
+  {
+   "adset_id": "2001",
+   "created_time": "2026-10-01T09:30:00+0530",
+   "creative": {
+    "body": "Body",
+    "call_to_action_type": "SHOP_NOW",
+    "id": "4001",
+    "object_type": "SHARE",
+    "title": "Headline"
+   },
+   "id": "3001",
+   "name": "ad",
+   "status": "ACTIVE"
+  },
+  {
+   "adset_id": "2002",
+   "id": "3002",
+   "name": "ad2",
+   "status": "IN_PROCESS"
+  }
+ ],
+ "adsets": [
+  {
+   "campaign_id": "1001",
+   "id": "2001",
+   "learning_stage_info": {
+    "status": "LEARNING"
+   },
+   "name": "learning",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "status": "ACTIVE"
+  },
+  {
+   "campaign_id": "1002",
+   "daily_budget": "123456",
+   "id": "2002",
+   "learning_stage_info": {
+    "status": "FAIL"
+   },
+   "name": "limited",
+   "status": "ACTIVE"
+  },
+  {
+   "campaign_id": "1002",
+   "daily_budget": "20000",
+   "id": "2003",
+   "learning_stage_info": {
+    "status": "SUCCESS"
+   },
+   "name": "done",
+   "status": "ACTIVE"
+  },
+  {
+   "campaign_id": "1003",
+   "id": "2004",
+   "name": "unknown",
+   "status": "ACTIVE"
+  }
+ ],
+ "campaigns": [
+  {
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "daily_budget": "50000",
+   "effective_status": "ACTIVE",
+   "id": "1001",
+   "name": "CBO",
+   "objective": "OUTCOME_SALES",
+   "status": "ACTIVE"
+  },
+  {
+   "effective_status": "PAUSED",
+   "id": "1002",
+   "name": "ABO",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED"
+  },
+  {
+   "effective_status": "ACTIVE",
+   "id": "1003",
+   "lifetime_budget": "9000000",
+   "name": "ASC",
+   "objective": "OUTCOME_SALES",
+   "smart_promotion_type": "AUTOMATED_SHOPPING_ADS",
+   "status": "ACTIVE"
+  },
+  {
+   "daily_budget": "0",
+   "effective_status": "ARCHIVED",
+   "id": "1004",
+   "name": "Archived",
+   "status": "ARCHIVED"
+  }
+ ],
+ "debug_token": {
+  "data": {
+   "expires_at": 1794700000
+  }
+ },
+ "insights": {
+  "account": [
+   {
+    "account_id": "000000000001",
+    "action_values": [
+     {
+      "action_type": "offsite_conversion.fb_pixel_purchase",
+      "value": "2999.5"
+     },
+     {
+      "action_type": "omni_purchase",
+      "value": "5000"
+     }
+    ],
+    "actions": [
+     {
+      "action_type": "link_click",
+      "value": "30"
+     },
+     {
+      "action_type": "offsite_conversion.fb_pixel_purchase",
+      "value": "3"
+     },
+     {
+      "action_type": "omni_purchase",
+      "value": "4"
+     },
+     {
+      "action_type": "video_view",
+      "value": "77"
+     }
+    ],
+    "date_start": "2026-11-09",
+    "date_stop": "2026-11-09",
+    "impressions": "1000",
+    "inline_link_clicks": "25",
+    "spend": "4200.45"
+   }
+  ],
+  "ad": [],
+  "adset": [],
+  "campaign": [
+   {
+    "account_id": "000000000001",
+    "campaign_id": "1001",
+    "date_start": "2026-11-09",
+    "date_stop": "2026-11-09",
+    "impressions": "1000",
+    "inline_link_clicks": "25",
+    "spend": "4200.45"
+   },
+   {
+    "account_id": "000000000001",
+    "campaign_id": "1001",
+    "date_start": "2026-11-11",
+    "date_stop": "2026-11-11",
+    "impressions": "10",
+    "inline_link_clicks": "1",
+    "spend": "99.99"
+   }
+  ]
+ },
+ "insights_hourly": {
+  "account": [
+   {
+    "account_id": "000000000001",
+    "date_start": "2026-11-11",
+    "date_stop": "2026-11-11",
+    "hourly_stats_aggregated_by_advertiser_time_zone": "13:00:00 - 13:59:59",
+    "impressions": "5",
+    "inline_link_clicks": "1",
+    "spend": "12.34"
+   },
+   {
+    "account_id": "000000000001",
+    "date_start": "2026-11-11",
+    "date_stop": "2026-11-11",
+    "hourly_stats_aggregated_by_advertiser_time_zone": "02:00:00 - 02:59:59",
+    "impressions": "1",
+    "inline_link_clicks": "0",
+    "spend": "1.00"
+   }
+  ],
+  "campaign": []
+ },
+ "insights_window": {
+  "ad": [],
+  "adset": [
+   {
+    "account_id": "000000000001",
+    "adset_id": "2001",
+    "date_start": "2026-11-04",
+    "date_stop": "2026-11-10",
+    "frequency": "2.5",
+    "reach": "800"
+   }
+  ],
+  "campaign": []
+ }
+}
