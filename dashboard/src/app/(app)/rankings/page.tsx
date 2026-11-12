@@ -5,7 +5,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { formatMoney, formatNumber, formatPct, formatRoas, humanize, toNum } from "@/lib/format";
 import type { Platform, RankLevel, Rankings, Targets } from "@/lib/types";
-import { intervalFor } from "@/lib/rankings";
+import { intervalFor, peerGroupLabel, rankingParentLine } from "@/lib/rankings";
 import { useApi } from "@/lib/useApi";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { IntervalBar } from "@/components/charts/IntervalBar";
@@ -54,7 +54,7 @@ function RankTable({ data, targets, currency, showLow }: { data: Rankings; targe
               header ? (
                 <tr key={`h-${r.peer_group}-${i}`} className="bg-slate-50">
                   <td colSpan={8} className="px-3 py-1.5 text-xs font-medium text-slate-500">
-                    Peer group: {r.peer_group ?? "—"} · {r.peer_size ?? "?"} entities
+                    {peerGroupLabel(r.peer_group, r.peer_size)}
                   </td>
                 </tr>
               ) : null,
@@ -69,8 +69,7 @@ function RankTable({ data, targets, currency, showLow }: { data: Rankings; targe
                       <div className="max-w-sm truncate font-medium text-slate-900">{r.name ?? `${humanize(r.entity_type)} #${r.entity_id}`}</div>
                       {r.entity_type !== "campaign" && r.campaign_id != null && (
                         <Link href={`/campaigns/${r.campaign_id}`} className="block max-w-sm truncate text-xs text-slate-500 hover:underline">
-                          {r.campaign_name ?? `Campaign #${r.campaign_id}`}
-                          {r.parent_name && r.parent_id !== r.campaign_id ? ` › ${r.parent_name}` : ""}
+                          {rankingParentLine(r)}
                         </Link>
                       )}
                     </div>
