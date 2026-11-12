@@ -169,8 +169,74 @@ Ids use the `D-INT-` prefix so they never collide with phase decisions.
   The engine polls every minute (`FOR UPDATE SKIP LOCKED`), re-checks the `MANUAL_JOBS`
   whitelist (else `rejected`), runs the job through the normal runner (advisory lock +
   `job_runs` idempotency, so a manual run of an already-completed window is a no-op), and fails
-  requests stuck `running` > 6 h. Phase 3/4 jobs stay 501; `retention`/`backfill` are CLI-only.
+  requests stuck `running` > 6 h. `retention`/`backfill` stay CLI-only. Phase 3 jobs (`emergency_restore`, `reconcile`, `evaluate`, `execute_approved`, `token_reset`) are in `MANUAL_JOBS` and run through the executor's write gate (D-28); they are no longer 501.
 - **D-INT-5 Proxy trust and root path.** uvicorn trusts `X-Forwarded-*` only from the pinned
   proxy IP and runs with `--root-path /ads-autopilot` so `/api/v1/docs` works behind the
   prefix-stripping proxy. Cookies stay `Secure` (HTTPS required except `localhost`).
 
+
+## Phase 3 / 5 — executor write path (code only; no live platform writes)
+
+The executor, write connectors, evaluator, rollback and emergency stop are implemented against
+**fake platforms** and mocked SDKs. Nothing is sent to Meta or Google until Govinda signs off
+the Phase 2 exit criteria and the Phase 3 gate (plan §0.5, §12.1). Default
+`clients.execution_enabled = false`, `HARD_MAX_MODE=suggest`, write tokens empty.
+
+- **D-27 Idempotency keys.** Every platform write has a deterministic key stored on
+  `change_log.idempotency_key` (unique per client). Shapes: `proposal:` + sha256 of
+  `(proposal_id, op index, target, intended)` (32 hex chars);
+  `emergency:{platform}:{trigger}:{local_day}:{campaign_id}`;
+  `pause_all:{request_id}:{platform}:{campaign_id}`; `rollback:{change_id}`;
+  `restore:{emergency_action_id}:{campaign_id}`. The duplicate guard is the
+  `approved → executing` transition under a row lock **plus** `INSERT … ON CONFLICT DO NOTHING`
+  on `(client_id, idempotency_key)`. A crash between intent and result leaves the row
+  `applying`; the reconciler (D-30) finishes it.
+- **D-28 `clients.execution_enabled` is the master write switch.** It lives in the DB (default
+  `false`), not in env, because `.env.example` must stay equal to the plan's §7.2 defaults and
+  a live flag has to be flipped by an admin without a restart. The write gate is closed when
+  the flag is off, when `mode = read_only`, when the mode is above `HARD_MAX_MODE`, or when
+  the kill switch is on (the kill switch is skipped for spend-reducing emergency / pause-all).
+  The flag also applies to emergency stop, pause-all, rollback and restore. Turning it on
+  does not raise the mode or `HARD_MAX_MODE`. **Suggest-mode semantics:** plan §12.1 says
+  suggest executes *human-approved* proposals once the write path is on; the original Phase 3
+  brief also said "read_only/suggest never write". The code follows the plan: suggest +
+  `execution_enabled` will apply approved proposals (and reducing emergency writes). Govinda
+  should confirm this before any live write.
+- **D-29 `write_requests` queue (API 202, engine poller).** The API never holds a write
+  credential and never imports a write connector. Rollback, restore and pause-all validate,
+  audit and insert a `queued` `write_requests` row (202). A partial unique index allows one
+  open request per `(client_id, dedupe_key)` (409 `already_queued`). The engine poller (every
+  minute, `FOR UPDATE SKIP LOCKED`) runs the write through the executor and stores the result.
+  Requests left `running` > 30 minutes are marked failed (the write itself is still protected
+  by D-27 + the reconciler). Dry-run is computed in the API from DB state via
+  `engine.executor.plan` + `gate` (the platform is not called).
+- **D-30 `execute_approved` job and the reconciler.** Approved proposals are picked up every
+  5 minutes (`execute_approved`, plan §14.5 "Otherwise → executor") as well as by the daily
+  pipeline's `execute` step. Both skip with reason `write gate closed: …` when the gate is
+  shut (and not a kill-switch reduction). The reconciler runs hourly at :20 and on engine
+  startup: `change_log` rows left `applying` for > 5 minutes are re-read from the platform
+  (matches intended → applied; still equals before → failed; otherwise `verify_failed` +
+  critical `reconcile_drift`). It also finalizes `executing` proposals whose last
+  `checked_at` is older than the cutoff.
+- **D-31 Planning `new_ad` / `add_negative`.** Meta: one new ad per variant of the draft,
+  always created PAUSED from a template creative (V-28). Google: one RSA per draft, always
+  PAUSED (V-29). Negatives are ad-group level only (Google); a `search_term` proposal maps to
+  its ad group. One evaluation is created per proposal, on the first non-noop change.
+  Rolling back a new ad means ensuring it is PAUSED (it is never deleted).
+- **D-32 Evaluation units.** The unit a D+3 / D+7 / D+14 looks at is: ad pause/new ad → parent
+  ad group; ad group pause → parent campaign; campaign pause or budget change → the campaign
+  itself. (Search-term negatives are not evaluated as a spend change.)
+- **D-33 Rollback guard.** A rollback (manual, evaluator, or restore) re-reads the platform
+  and applies the `rollback_payload` only if the state still equals the change's result.
+  Otherwise it inserts a `rollback_with_state_drift` proposal (`rule_key = rollback:{id}`,
+  `risk = high`) that needs approval. The guardrail used is steps 1–4 of `check`, plus step 9
+  (caps) when the rollback would increase spend (`rollback_checks`). Evaluator-sourced
+  rollbacks are privileged the same way; a human rollback goes through the same path. The
+  original change is marked `rolled_back`; open evaluations on it are closed
+  `cancelled: rolled back by change #N`.
+- **D-34 Evaluation edge cases.** Pre-period spend 0 is `insufficient_data` (nothing to
+  compare). A D+3 `worse` rollback cancels the D+7 (it does not count toward `rule_stats`).
+  An insufficient D+7 schedules a D+14 (14-day post period); an insufficient D+14 is a final
+  `neutral`. Emergency-action rows list only **applied** pauses (unknown outcomes go to the
+  reconciler, not the paused list). Restore also re-runs the monthly-cap check and will not
+  re-enable a campaign whose last `entity_history.source` is no longer `emergency`.

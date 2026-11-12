@@ -23,7 +23,7 @@ Default local DBs: `ads_autopilot` and `ads_autopilot_test` (user/password `ads`
 | Area | Owner | Files |
 |---|---|---|
 | Foundation / shared contracts | lead | `engine/config.py`, `engine/enums.py`, `engine/errors.py`, `engine/db/`, `db/`, `engine/bootstrap.py`, `engine/credentials/`, `engine/connectors/base.py`, `engine/connectors/money.py`, `engine/rules/registry.py`, `engine/guardrails/check.py` (types), `api/auth/adapter.py`, `engine/llm/client.py`, CI, compose |
-| Connectors + ingestion | connectors agent | `engine/connectors/{meta,google}_read.py`, `ga4.py`, `engine/ingest/`, `jobs/hourly.py`, backfill; `*_write.py` (Phase 3/5) |
+| Connectors + ingestion | connectors agent | `engine/connectors/{meta,google}_read.py`, `ga4.py`, `engine/ingest/`, `jobs/hourly.py`, backfill; `*_write.py` (Phase 3/5 code, fakes only until the Phase 3 gate) |
 | API + auth + CLI + notify | API agent | `api/`, `cli/`, `engine/notify/`, `engine/approvals/` |
 | Dashboard | dashboard agent | `dashboard/` |
 | Features, ranking, rules, guardrails | ranking agent | `engine/features/`, `engine/ranking/`, `engine/rules/engine.py`, `engine/guardrails/check.py` (body), `tests/property/` |
@@ -37,7 +37,8 @@ Default local DBs: `ads_autopilot` and `ads_autopilot_test` (user/password `ads`
 2. **WriteConnector** may be imported only in `engine/executor/**` and
    `engine/pacing/emergency.py`; **platform SDKs** and **`connectors.money`** only in
    `engine/connectors/**`; **CLI** never imports DB code; only `engine/config.py` reads env vars.
-   `tests/unit/test_import_boundaries.py` fails the build otherwise.
+   The API may import `engine.executor.plan` and `engine.executor.gate` (dry-run / write-gate
+   status) but never a write module. `tests/unit/test_import_boundaries.py` fails the build otherwise.
 3. **Money**: `Decimal`, major units, 2 dp outside connectors. Never floats for money.
 4. **Time**: store UTC `TIMESTAMPTZ`; metric `date` / `ts_hour` are ad-account-local
    (`ts_hour` is the one naive timestamp column, by design — test-enforced).
@@ -45,8 +46,10 @@ Default local DBs: `ads_autopilot` and `ads_autopilot_test` (user/password `ads`
    `job_runs (client_id, job, step, window_key)` (NULL step counts as a value).
 6. **DB is the runtime source of truth** for mode, kill switch, rules, limits. Read the
    active `config_versions` row via `parse_rules` / `parse_limits`; never re-read the YAML.
-7. **No live writes** before the Phase 3 gate; write tokens stay empty, the env credentials
-   provider refuses `access=write` while they are.
+7. **No live writes** before the Phase 3 gate (plan §0.5). Write tokens stay empty (the env
+   credentials provider refuses `access=write` while they are), `HARD_MAX_MODE` stays
+   `suggest`, and `clients.execution_enabled` defaults to false (D-28). Flip the flag only
+   after Govinda signs off — never invent caps, account ids or targets. See D-27..D-34.
 8. **Secrets**: only via `engine.credentials.get_credentials`. Settings hold them as
    `SecretStr`; never log or unwrap them elsewhere.
 9. **Fixed seeds** for every Monte Carlo draw (§0.8).

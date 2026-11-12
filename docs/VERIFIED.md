@@ -36,6 +36,8 @@ ranking or guardrail code.
 | V-25 | §21 | Meta token expiry via `GET /debug_token?input_token=…&access_token=app_id\|app_secret` → `data.expires_at` (0 = never; system-user tokens). Google refresh tokens expose no expiry: health check only detects failures. | ☐ open | | | | | |
 | V-26 | §8.2 | Google `campaign_budget.explicitly_shared` ⇒ `budget_level=shared`; `campaign_budget.period=DAILY` ⇒ `amount_micros` is the daily budget. `change_event.change_date_time` format/timezone (`YYYY-MM-DD HH:MM:SS[.ffffff]`, account tz), `changed_fields` serialisation (comma-separated paths) and the `old_resource`/`new_resource` keys used in `_CHANGE_MAP`. | ☐ open | | | | | |
 | V-27 | §9.2 | Meta `activities` `extra_data` JSON keys `old_value`/`new_value`, and budget values in minor units. | ☐ open | | | | | |
+| V-28 | §15 | Meta new-ad path: a template ad's creative is fetched (`creative{id,title,body,object_story_spec}`) and `link_data`/`video_data` title/body/message are replaced; `execution_options=['validate_only']` on the ad create (V-12). Confirm the story-spec shape and which fields may be overwritten for link and video ads. Constants in `engine/connectors/meta_write.py` (`TEMPLATE_AD_FIELDS`). | ☐ open | | | | | |
+| V-29 | §15 | Google Responsive Search Ad limits and mutate fields: 3–15 headlines ≤ 30 chars, 2–4 descriptions ≤ 90 chars; RSA created PAUSED; final URLs copied from the template ad. Constants `RSA_HEADLINES` / `RSA_DESCRIPTIONS` in `engine/connectors/google_write.py`. | ☐ open | | | | | |
 
 Connector notes (connectors agent, 11 Nov 2026): every value above is centralised as a constant
 at the top of `engine/connectors/meta_read.py` / `google_read.py`; a doc check changes only

@@ -75,29 +75,42 @@ ships in the named phase. DB-only writes (no ad-platform call) are audited in `a
 | GET | `/metrics?entity_type=&entity_id=&grain=day\|hour&from=&to=&platform=` | viewer | live | hour only for account/campaign |
 | GET | `/rankings?level=ad\|ad_group\|keyword\|campaign&platform=&top=` | viewer | live | latest `scores.as_of`; empty until scoring runs (Phase 2); rows carry campaign/parent names, 14 d + 7 d spend/conversions, `fatigue_flag`, `learning`; response carries `targets` |
 | GET | `/proposals?status=` · `/proposals/{id}` | viewer | live | includes latest approval row, `entity_name`, `platform`, `campaign_id/name`, `change {field,before,after,after_is_estimate}`, a typed `guardrail_result`, and for escalations (status `escalated`) the LLM `triage {outcome, action, confidence, tier, reason, cause, llm_call_id, proposal_id, at}` from `params.triage` |
-| POST | `/proposals/{id}/approve` `{comment?}` · `/reject` `{reason}` · `/approve-batch` `{ids,comment?}` | approver | live | records decision → `approved`/`rejected`; 409 if not `awaiting_approval` or expired. **The executor (Phase 3) re-runs the guardrail with fresh state before applying; nothing is sent to a platform now** |
+| POST | `/proposals/{id}/approve` `{comment?}` · `/reject` `{reason}` · `/approve-batch` `{ids,comment?}` | approver | live | records decision → `approved`/`rejected`; 409 if not `awaiting_approval` or expired. The executor later re-runs the guardrail with fresh state (`approved=true`) before applying; nothing is sent at approve time |
 | POST | `/proposals` | admin | live | manual `source=human` proposal inserted `pending`; guardrailed by the pipeline's guardrail step |
-| GET | `/proposals/{id}/dry-run` | viewer | **501** (Phase 3) | executor builds payloads |
+| GET | `/proposals/{id}/dry-run` | viewer | live | guardrail re-run (`approved=true`) on current DB state, then the planned ops with `before` as last synced; the platform is not called. Includes the write-gate state (D-28). A `plan_error` is returned rather than 4xx when the proposal cannot be turned into ops |
 | GET | `/changes?since=7d\|YYYY-MM-DD&status=` | viewer | live | with evaluations + latest D+7/D+14 `verdict`; same `entity_name`/`change` fields as proposals |
-| POST | `/changes/{id}/rollback` | approver | **501** (Phase 3) | |
+| POST | `/changes/{id}/rollback` `{reason?}` | approver | live | 202 + `write_request` (D-29); 409 if not `applied` or already queued; 404 unknown. The engine re-reads the platform and either applies the rollback payload (D-33) or opens a `rollback_with_state_drift` proposal. Audited `write.rollback_requested` |
 | GET | `/evaluations?change_id=&open_only=` | viewer | live | |
 | GET | `/rules`, `/limits` | viewer | live | active version + history |
 | PUT | `/rules`, `/limits` `{body, reason}` | admin | live | new active version; schema + registry names + `HARD_*` ceilings + currency validated (422) |
 | GET | `/llm/usage?range=30d` | viewer | live | from `llm_calls` (days in the client timezone, by call time); `llm_enabled`, `provider`, `disabled_reason`, models from `engine.llm.status.llm_status` (same decision the engine makes) |
 | GET | `/alerts?open=true&severity=` · POST `/alerts/{id}/ack` | viewer · approver | live | |
 | GET | `/emergency-actions?active_only=` | viewer | live | |
-| POST | `/emergency-actions/{id}/restore` | approver | **501** (Phase 3) | |
+| POST | `/emergency-actions/{id}/restore` `{reason?}` | approver | live | 202 + `write_request`; 409 if already restored or already queued. Engine re-enables only campaigns still PAUSED with last `entity_history.source = emergency`, behind the write gate. Audited |
 | POST | `/control/mode` `{mode, reason?}` | admin | live | 403 above `HARD_MAX_MODE` |
 | POST | `/control/kill-switch` `{on, reason?}` | admin | live | returns effective/db/env; env override can't be cleared |
-| POST | `/control/pause-all` `{platform?, confirm:true}` | approver | **501** (Phase 3) | 422 without `confirm` |
-| POST | `/jobs/{name}/run` | admin | live | inserts a `job_requests` row (202 + request); the engine's `job_requests` poller (every minute) runs whitelisted jobs (`manual_jobs` in `/system`) with the normal advisory lock + `job_runs` idempotency. 409 `already_queued` (one open request per job), 404 unknown, 422 CLI-only (`retention`, `backfill`), **501** `emergency_restore` (Phase 3), `token_reset` (Phase 4). Audited `job.run_requested` |
+| POST | `/control/pause-all` `{platform?, confirm:true, reason?}` | approver | live | 202 + `write_request` (one or both platforms); 422 without `confirm`; 409 if the same scope is already queued. Spend-reducing (passes the kill switch) but still needs `execution_enabled` and mode ≠ `read_only`. Audited |
+| POST | `/jobs/{name}/run` | admin | live | inserts a `job_requests` row (202 + request); the engine's `job_requests` poller (every minute) runs whitelisted jobs (`manual_jobs` in `/system`, including `execute_approved`, `evaluate`, `reconcile`, `emergency_restore`, `token_reset`) with the normal advisory lock + `job_runs` idempotency. 409 `already_queued`, 404 unknown, 422 CLI-only (`retention`, `backfill`). Jobs that can write do so only through the executor (write gate D-28 + guardrail). Audited `job.run_requested` |
 | GET | `/jobs/requests?limit=` · `/jobs/requests/{id}` | admin | live | queue status: `queued → running → success/failed`; `rejected` for names not whitelisted by the engine; running > 6 h → failed |
-| GET | `/system` | viewer | live | ad accounts + staleness (>2 h), latest run per job/step, 7-day failures, `heartbeat` (healthy = pacing ok within 30 min and last ping not failed), `platform_operations[]` (today's count published by the engine, limit + access level), `manual_jobs`, `recent_job_requests` |
+| GET | `/system` | viewer | live | ad accounts + staleness (>2 h), latest run per job/step, 7-day failures, `heartbeat` (healthy = pacing ok within 30 min and last ping not failed), `platform_operations[]` (today's count published by the engine, limit + access level), `manual_jobs`, `recent_job_requests`, `execution` (write gate D-28), `recent_write_requests` |
+| GET / POST | `/control/execution` `{enabled, reason?}` | viewer / admin | live | master write switch (`clients.execution_enabled`, default false; D-28). POST is audited; turning it on does not raise the mode or `HARD_MAX_MODE` |
+| GET | `/write-requests?limit=` · `/write-requests/{id}` | viewer | live | queue status for rollback / restore / pause-all (`queued → running → success/failed`) |
 | GET | `/metrics` (root, not `/api/v1`) | bearer `METRICS_TOKEN` | live | Prometheus; 404 if token unset; not routed by the proxy |
+
+## Write path (Phase 3 / 5 code, D-27..D-34)
+
+The API never holds a write credential. `POST /changes/{id}/rollback`,
+`/emergency-actions/{id}/restore` and `/control/pause-all` return **202** with a
+`write_request` body; the engine poller (every minute) performs the write behind the write
+gate (`execution_enabled`, mode, `HARD_MAX_MODE`, kill switch — D-28). Dry-run is a GET
+computed from DB state; the executor itself still re-reads the platform and sends a
+validate-only request before applying. **No live writes** until Govinda signs off the Phase 2
+exit criteria, issues write tokens, raises `HARD_MAX_MODE` if needed, and turns
+`execution_enabled` on.
 
 ## CLI (§19)
 
-`ads login|logout|whoami|status|proposals|approve|reject|dry-run|changes|rollback|pause-all|restore|manage|mode|kill-switch|run|rankings|llm-usage|alerts|ack|version`,
+`ads login|logout|whoami|status|proposals|approve|reject|dry-run|changes|rollback|pause-all|restore|write-request|manage|mode|kill-switch|execution|run|rankings|llm-usage|alerts|ack|version`,
 global `--api-url` (`ADS_API_URL`), `--token-file` (`ADS_TOKEN_FILE`, default
 `~/.config/ads-autopilot/credentials.json`, mode 0600), `--json`.
 Exit codes: 0 ok · 1 error · 2 usage · 3 auth/forbidden · 4 not enabled (501).

@@ -13,20 +13,25 @@ Postgres ──► features/ ──► ranking/ ──► rules/ ──► propo
 proposals ──► guardrails/check.py (pure) ──► Allow ──► executor/ (WriteConnector) ──► change_log
                                          ├─ NeedsApproval ──► approvals/ ──► executor/
                                          └─ Block ──► alerts
-change_log ──► evaluation/ (D+3, D+7) ──► executor/rollback.py
+change_log ──► evaluation/ (D+3, D+7, D+14) ──► executor/rollback.py
 pacing/ (15 min) ──► pacing/emergency.py (WriteConnector, pause only)
 Postgres ──► api/ (FastAPI /api/v1, auth/adapter.py) ──► dashboard/ (Next.js) and cli/ (Typer)
 proxy/Caddyfile: /ads-autopilot/api/* → api (prefix stripped); /ads-autopilot/* → dashboard
 api POST /jobs/{name}/run ──► job_requests ──► engine poller (1 min) ──► whitelisted job
+api POST rollback|restore|pause-all ──► write_requests ──► engine poller (1 min) ──► executor
 engine (pacing, heartbeat, op counters) ──► system_status ──► api /overview, /system
+clients.execution_enabled + mode + HARD_MAX_MODE + kill switch ──► write gate (D-28)
 ```
 
 | Layer | Package | Key interface (defined in Phase 0) |
 |---|---|---|
 | Settings | `engine/config.py` | `Settings`, `get_settings()`; HARD_* ceilings, env kill switch |
 | Shared vocab | `engine/enums.py` | `Platform`, `EntityType`, `Mode`, `Role`, `Action`, statuses |
-| DB | `engine/db/` | SQLAlchemy models for the 25 §8.3 tables + `notifications` (0002) + `job_requests`, `system_status` (0003), `session.py` |
-| Migrations | `db/` | Alembic, revisions `0001`, `0002`, `0003` |
+| DB | `engine/db/` | SQLAlchemy models for the 25 §8.3 tables + `notifications` (0002) + `job_requests`, `system_status` (0003) + `write_requests` and executor columns (0004; 29 tables), `session.py` |
+| Migrations | `db/` | Alembic, revisions `0001`–`0004` |
+| Executor | `engine/executor/` | plan, write gate, apply (write-ahead + validate_only), execute, reconcile, rollback; fake platforms in `connectors/fakes_write.py` |
+| Evaluation | `engine/evaluation/` | D+3 safety, D+7/D+14 Gamma-Poisson verdict, `rule_stats` |
+| Emergency | `engine/pacing/emergency.py` | pause managed campaigns, restore, pause-all; wired to `jobs.pacing.EMERGENCY_HANDLER` |
 | Seeding | `engine/bootstrap.py` | `bootstrap(session, settings)` (§7.1) |
 | Credentials | `engine/credentials/` | `get_credentials()`, `CredentialsProvider`, env + remote stub |
 | Connectors | `engine/connectors/base.py`, `money.py` | `ReadConnector`, `WriteConnector`, normalised records, money conversion |

@@ -45,3 +45,11 @@ Bumping an SDK or API version: update the pin, re-record contract fixtures
 | Date | Change | Reason |
 |---|---|---|
 | 2026-11-11 | initial pins | Phase 0 foundation |
+
+## Write path (Phase 3 / 5 code, 12 Nov 2026)
+
+`engine/connectors/meta_write.py` and `google_write.py` use the same SDK pins as the readers
+(`facebook-business==26.0.4`, `google-ads==35.0.0`, Google Ads API `v26`). The Meta Marketing
+API version is still unset (`META_API_VERSION`, VERIFY-P0). These modules are exercised only
+through mocked SDK clients and `engine/connectors/fakes_write.py` until write tokens exist and
+the Phase 3 gate is signed off. Assumptions that need a doc check: V-11, V-12, V-25, V-28, V-29.
