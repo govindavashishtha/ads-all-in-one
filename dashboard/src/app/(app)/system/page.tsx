@@ -41,7 +41,7 @@ export default function SystemPage() {
           const ops = sys.platform_operations;
           return (
             <div className="space-y-6">
-              <div className="grid gap-6 lg:grid-cols-3">
+              <div className="grid min-w-0 gap-6 lg:grid-cols-3">
                 <Card>
                   <CardHeader title="Control state" subtitle="Changed via CLI / API (admin)" />
                   <CardBody className="space-y-3 text-sm">
@@ -67,7 +67,7 @@ export default function SystemPage() {
                 <Card>
                   <CardHeader title="Heartbeat" subtitle="The pacing job pings HEARTBEAT_URL after every run (§21 dead-man's switch)" />
                   <CardBody className="space-y-3 text-sm" data-testid="heartbeat">
-                    <Row k="Health"><StatusBadge status={hb.healthy ? "healthy" : "stale"} /></Row>
+                    <Row k="Health"><StatusBadge status={!hb.configured || hb.last_status === "not_configured" ? "not_configured" : hb.healthy ? "healthy" : "stale"} /></Row>
                     <Row k="Last ping">
                       {hb.last_status === "unknown" ? (
                         <Badge tone="amber">not reported yet</Badge>
@@ -103,9 +103,10 @@ export default function SystemPage() {
                 </Card>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-3">
+              <div className="grid min-w-0 gap-6 lg:grid-cols-3">
                 <Card className="lg:col-span-2">
                   <CardHeader title="Ad accounts" subtitle="Data freshness (stale = no sync for over 2 h)" />
+                  <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-100">
                     <thead className="bg-slate-50/60">
                       <tr>
@@ -128,7 +129,7 @@ export default function SystemPage() {
                               <span className="font-mono text-xs text-slate-400">{a.external_id}</span>
                             </div>
                           </Td>
-                          <Td>{a.status ? <StatusBadge status={a.status} /> : "—"}</Td>
+                          <Td>{a.status ? <StatusBadge status={a.status} platform={a.platform} /> : "—"}</Td>
                           <Td className="text-xs">{a.currency} · {a.timezone}</Td>
                           <Td>
                             {a.last_synced_at ? relativeTime(a.last_synced_at) : "never"}
@@ -138,6 +139,7 @@ export default function SystemPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </Card>
                 <Card>
                   <CardHeader title="Platform API operations today" subtitle="Google alerts at 80% of the access level's daily limit (§4.3)" />

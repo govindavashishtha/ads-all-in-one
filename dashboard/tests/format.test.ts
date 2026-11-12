@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capRatio, formatMoney, formatPct, formatRoas, localDateMinus, paceTone, toNum } from "@/lib/format";
+import { accountStatusLabel, capRatio, formatMoney, formatPct, formatRoas, localDateMinus, paceTone, pluralize, toNum } from "@/lib/format";
 
 describe("format", () => {
   it("formats INR with Indian digit grouping from the account currency", () => {
@@ -35,5 +35,24 @@ describe("format", () => {
     expect(localDateMinus(0, "Asia/Kolkata", now)).toBe("2026-11-12");
     expect(localDateMinus(0, "UTC", now)).toBe("2026-11-11");
     expect(localDateMinus(1, "Asia/Kolkata", now)).toBe("2026-11-11");
+  });
+});
+
+
+describe("pluralize and account status", () => {
+  it("pluralizes counts", () => {
+    expect(pluralize(0, "call")).toBe("0 calls");
+    expect(pluralize(1, "call")).toBe("1 call");
+    expect(pluralize(2, "call")).toBe("2 calls");
+    expect(pluralize(1, "entity", "entities")).toBe("1 entity");
+    expect(pluralize(2, "entity", "entities")).toBe("2 entities");
+  });
+  it("maps Meta account_status integers for display only", () => {
+    expect(accountStatusLabel("1", "meta")).toBe("active");
+    expect(accountStatusLabel("2", "meta")).toBe("disabled");
+    expect(accountStatusLabel("101", "meta")).toBe("closed");
+    expect(accountStatusLabel("ENABLED", "google")).toBe("ENABLED");
+    expect(accountStatusLabel("1", "google")).toBe("1");
+    expect(accountStatusLabel(null, "meta")).toBeNull();
   });
 });

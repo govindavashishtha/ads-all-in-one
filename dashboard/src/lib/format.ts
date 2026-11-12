@@ -151,3 +151,35 @@ export function addDaysIso(date: string, n: number): string {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+
+
+/** "1 call" / "2 calls". */
+export function pluralize(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
+/**
+ * Display label for an ad-account `status` string.
+ *
+ * Meta stores Marketing API `account_status` as a decimal string (V-13 is still
+ * VERIFY-P0 open). Google already uses names like ENABLED. Mapping is display-only.
+ * Source: Meta Ad Account `account_status` values.
+ */
+const META_ACCOUNT_STATUS: Record<string, string> = {
+  "1": "active",
+  "2": "disabled",
+  "3": "unsettled",
+  "7": "pending_risk_review",
+  "8": "pending_settlement",
+  "9": "in_grace_period",
+  "100": "pending_closure",
+  "101": "closed",
+  "201": "any_active",
+  "202": "any_closed",
+};
+
+export function accountStatusLabel(status: string | null | undefined, platform?: string | null): string | null {
+  if (status == null || status === "") return null;
+  if (platform === "meta" && META_ACCOUNT_STATUS[status] != null) return META_ACCOUNT_STATUS[status];
+  return status;
+}

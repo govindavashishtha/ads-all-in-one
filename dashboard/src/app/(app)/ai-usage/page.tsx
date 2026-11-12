@@ -1,7 +1,7 @@
 "use client";
 
 import { api } from "@/lib/api";
-import { capRatio, formatNumber, formatUsd, humanize, paceTone } from "@/lib/format";
+import { capRatio, formatNumber, formatUsd, humanize, paceTone, pluralize } from "@/lib/format";
 import type { LlmUsageTotals } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { TokensChart } from "@/components/charts/charts";
@@ -47,8 +47,8 @@ export default function AiUsagePage() {
                     sub={u.daily_token_cap ? `of ${formatNumber(u.daily_token_cap)} cap` : "no cap"}
                     tone={paceTone(tokRatio) === "danger" ? "danger" : paceTone(tokRatio) === "warn" ? "warn" : undefined}
                   />
-                  <Stat label="Cost today" value={formatUsd(u.today.cost_usd, 3)} sub={`${u.today.calls ?? 0} calls`} />
-                  <Stat label="Tokens MTD" value={formatNumber(tokens(u.month_to_date))} sub={`${u.month_to_date.calls ?? 0} calls`} />
+                  <Stat label="Cost today" value={formatUsd(u.today.cost_usd, 3)} sub={pluralize(u.today.calls ?? 0, "call")} />
+                  <Stat label="Tokens MTD" value={formatNumber(tokens(u.month_to_date))} sub={pluralize(u.month_to_date.calls ?? 0, "call")} />
                   <Stat
                     label="Cost MTD"
                     value={formatUsd(u.month_to_date.cost_usd)}
@@ -68,6 +68,7 @@ export default function AiUsagePage() {
               </Card>
               <Card>
                 <CardHeader title="By purpose" subtitle={`Last ${u.range_days} days`} />
+                <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-100">
                   <thead className="bg-slate-50/60">
                     <tr>
@@ -92,6 +93,7 @@ export default function AiUsagePage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </Card>
             </div>
           );

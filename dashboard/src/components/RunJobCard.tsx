@@ -44,7 +44,7 @@ export function RunJobCard({
 
   return (
     <Card>
-      <CardHeader title="Run a job now" subtitle="Queued for the engine scheduler (read-side jobs only; nothing is written to an ad platform)" />
+      <CardHeader title="Run a job now" subtitle="Queued for the engine scheduler (about a minute). Jobs that write still go through the write gate; nothing is sent from this page." />
       <CardBody className="space-y-4 text-sm">
         {canRun ? (
           <div className="flex flex-wrap items-center gap-2">

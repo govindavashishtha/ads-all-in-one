@@ -1,5 +1,5 @@
 import type { KillSwitchState, Mode, Platform } from "@/lib/types";
-import { humanize } from "@/lib/format";
+import { accountStatusLabel, humanize } from "@/lib/format";
 import { Badge, type Tone } from "./ui";
 
 const modeTone: Record<Mode, Tone> = { read_only: "slate", suggest: "blue", auto_small: "violet", auto: "amber" };
@@ -49,6 +49,7 @@ const statusTone: Record<string, Tone> = {
   expired: "slate",
   skipped: "slate",
   unconfigured: "slate",
+  not_configured: "slate",
   rejected: "slate",
   rolled_back: "violet",
   blocked: "red",
@@ -61,8 +62,8 @@ const statusTone: Record<string, Tone> = {
   info: "blue",
 };
 
-export function StatusBadge({ status }: { status: string | null | undefined }) {
-  const key = (status ?? "").toLowerCase();
+export function StatusBadge({ status, platform }: { status: string | null | undefined; platform?: string | null }) {
+  const key = (accountStatusLabel(status, platform) ?? status ?? "").toLowerCase();
   return <Badge tone={statusTone[key] ?? "slate"}>{humanize(key || "unknown")}</Badge>;
 }
 

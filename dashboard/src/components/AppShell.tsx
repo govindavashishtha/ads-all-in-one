@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-950 text-slate-300 md:flex">
         <div className="px-5 py-5">
           <div className="text-sm font-semibold tracking-tight text-white">ads-autopilot</div>
@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
-        <main className="flex-1 px-6 py-6">{children}</main>
+        <main className="min-w-0 flex-1 px-6 py-6">{children}</main>
       </div>
     </div>
   );

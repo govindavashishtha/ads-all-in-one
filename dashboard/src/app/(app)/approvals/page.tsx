@@ -75,8 +75,10 @@ export default function ApprovalsPage() {
         {(list: Proposal[]) =>
           list.length === 0 ? (
             <Card>
-              <EmptyState title={tab === "awaiting_approval" ? "Nothing waiting for you" : "No proposals"}>
-                New proposals are created by the daily pipeline.
+              <EmptyState title={tab === "awaiting_approval" ? "Nothing waiting for you" : `No ${tab === "all" ? "proposals" : tab.replace(/_/g, " ")} proposals`}>
+                {tab === "awaiting_approval" || tab === "all" || tab === "escalated" || tab === "blocked"
+                  ? "New proposals are created by the daily pipeline."
+                  : "Decisions and executions will show up here."}
               </EmptyState>
             </Card>
           ) : (
