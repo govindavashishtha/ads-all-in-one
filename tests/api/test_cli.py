@@ -109,17 +109,23 @@ def test_proposals_approve_reject(cli: Cli, world: World) -> None:
     assert {r["status"] for r in all_rows} >= {"approved", "pending"}
 
 
-def test_not_enabled_commands_exit_4(cli: Cli, world: World) -> None:
+def test_write_path_commands(cli: Cli, world: World) -> None:
     _login(cli)
-    out = cli("dry-run", str(world.proposal_waiting), code=ads.EXIT_NOT_ENABLED)
-    assert "Phase 3" in out
-    cli("rollback", str(world.change), "--yes", code=ads.EXIT_NOT_ENABLED)
+    out = cli("dry-run", str(world.proposal_waiting))
+    assert "guardrail block mode_read_only" in out and "write gate: CLOSED" in out
+    out = cli("rollback", str(world.change), "--yes")
+    assert "queued rollback as write request #" in out
+    req_id = out.split("#")[1].split()[0]
+    assert "rollback: queued" in cli("write-request", req_id)
+    cli("rollback", str(world.change), "--yes", code=1)  # already queued (409)
     cli("rollback", str(world.change), input="n\n", code=1)  # aborted at the prompt
     cli("pause-all", code=2)
-    cli("pause-all", "--platform", "meta", "--confirm", code=ads.EXIT_NOT_ENABLED)
-    cli("restore", str(world.emergency), code=ads.EXIT_NOT_ENABLED)
+    assert "queued pause_all" in cli("pause-all", "--platform", "meta", "--confirm")
+    assert "queued restore" in cli("restore", str(world.emergency))
+    assert "execution off" in cli("execution")
+    assert "execution ON" in cli("execution", "on", "--reason", "test")
     assert "queued hourly_pull as request #" in cli("run", "hourly_pull")
-    cli("run", "emergency_restore", code=ads.EXIT_NOT_ENABLED)
+    assert "queued emergency_restore" in cli("run", "emergency_restore")
     cli("run", "nope", code=1)
 
 

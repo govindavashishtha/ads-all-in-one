@@ -343,10 +343,38 @@ def reject(
 
 @app.command("dry-run")
 def dry_run(ctx: typer.Context, proposal_id: int) -> None:
-    """Payload that would be sent to the platform."""
+    """What the executor would send for a proposal (nothing is sent or changed)."""
     c = _ctx(ctx)
     d = Api(c).call("GET", f"proposals/{proposal_id}/dry-run")
-    _emit(c, d, lambda d: typer.echo(json.dumps(d, indent=2)))
+
+    def render(d: Any) -> None:
+        g = d["guardrail"]
+        typer.echo(
+            f"proposal {d['proposal_id']} {d['action']} ({d['status']}): guardrail "
+            f"{g.get('result')}{' ' + g['reason'] if g.get('reason') else ''}"
+        )
+        for op in d["ops"]:
+            typer.echo(
+                f"  {op['platform']} {op['entity_type']} {op['external_id']}: {op['op']} "
+                f"{json.dumps(op['args'] or op['intended'])}"
+                f"{'' if op['would_change'] else '  (already so: no-op)'}"
+            )
+        if d.get("plan_error"):
+            typer.echo(f"  plan error: {d['plan_error']}")
+        e = d["execution"]
+        typer.echo(
+            "write gate: "
+            + ("open" if e["write_gate_open"] else f"CLOSED — {e['write_gate_reason']}")
+        )
+
+    _emit(c, d, render)
+
+
+def _queued(d: Any) -> None:
+    typer.echo(
+        f"queued {d['kind']} as write request #{d['id']} — the engine runs it within a "
+        f"minute; check with `ads write-request {d['id']}`"
+    )
 
 
 # --------------------------------------------------------------------------- changes
@@ -387,7 +415,7 @@ def rollback(
     if not yes:
         typer.confirm(f"Roll back change {change_id}?", abort=True)
     d = Api(c).call("POST", f"changes/{change_id}/rollback")
-    _emit(c, d, lambda d: typer.echo(json.dumps(d, indent=2)))
+    _emit(c, d, _queued)
 
 
 @app.command("pause-all")
@@ -401,7 +429,7 @@ def pause_all(
     if not confirm:
         _fail("refusing without --confirm", 2)
     d = Api(c).call("POST", "control/pause-all", json={"platform": platform, "confirm": True})
-    _emit(c, d, lambda d: typer.echo(json.dumps(d, indent=2)))
+    _emit(c, d, _queued)
 
 
 @app.command()
@@ -409,7 +437,23 @@ def restore(ctx: typer.Context, emergency_action_id: int) -> None:
     """Restore campaigns paused by an emergency action."""
     c = _ctx(ctx)
     d = Api(c).call("POST", f"emergency-actions/{emergency_action_id}/restore")
-    _emit(c, d, lambda d: typer.echo(json.dumps(d, indent=2)))
+    _emit(c, d, _queued)
+
+
+@app.command("write-request")
+def write_request(ctx: typer.Context, request_id: int) -> None:
+    """Status/result of a queued rollback, restore or pause-all."""
+    c = _ctx(ctx)
+    d = Api(c).call("GET", f"write-requests/{request_id}")
+
+    def render(d: Any) -> None:
+        typer.echo(f"write request #{d['id']} {d['kind']}: {d['status']}")
+        if d.get("error"):
+            typer.echo(f"error: {d['error']}")
+        if d.get("result"):
+            typer.echo(json.dumps(d["result"], indent=2))
+
+    _emit(c, d, render)
 
 
 # --------------------------------------------------------------------------- control
@@ -467,6 +511,31 @@ def kill_switch(
         )
         if d.get("note"):
             typer.echo(d["note"])
+
+    _emit(c, d, render)
+
+
+@app.command()
+def execution(
+    ctx: typer.Context,
+    on_off: Annotated[str | None, typer.Argument(metavar="[on|off]")] = None,
+    reason: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Show or set the platform-write master switch (clients.execution_enabled; admin)."""
+    c = _ctx(ctx)
+    if on_off is None:
+        d = Api(c).call("GET", "control/execution")
+    else:
+        d = Api(c).call(
+            "POST", "control/execution", json={"enabled": _on_off(on_off), "reason": reason}
+        )
+
+    def render(d: Any) -> None:
+        typer.echo(
+            f"execution {'ON' if d['execution_enabled'] else 'off'}, mode {d['mode']} "
+            f"(max {d['hard_max_mode']}), write gate "
+            + ("open" if d["write_gate_open"] else f"CLOSED — {d['write_gate_reason']}")
+        )
 
     _emit(c, d, render)
 
