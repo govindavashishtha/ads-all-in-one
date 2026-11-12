@@ -17,7 +17,7 @@ import structlog
 from sqlalchemy import select, update
 
 from engine.db.models import WriteRequest
-from engine.enums import JobRequestStatus, WriteRequestKind
+from engine.enums import JobRequestStatus, Platform, WriteRequestKind
 from engine.executor.apply import WriteEnv
 from engine.executor.rollback import rollback_change
 
@@ -26,7 +26,14 @@ log = structlog.get_logger(__name__)
 STALE_RUNNING = dt.timedelta(minutes=30)
 
 
-def _run(env: WriteEnv, req_id: int, kind: str, target: int | None, by: str) -> dict[str, Any]:
+def _run(  # noqa: PLR0917
+    env: WriteEnv,
+    req_id: int,
+    kind: str,
+    target: int | None,
+    by: str,
+    params: dict[str, Any] | None,
+) -> dict[str, Any]:
     if kind == WriteRequestKind.ROLLBACK.value:
         assert target is not None
         r = rollback_change(env, target, requested_by=by)
@@ -42,7 +49,13 @@ def _run(env: WriteEnv, req_id: int, kind: str, target: int | None, by: str) -> 
         assert target is not None
         return restore_action(env, target, requested_by=by)
     if kind == WriteRequestKind.PAUSE_ALL.value:
-        results = pause_all(env, requested_by=by, request_id=req_id)
+        platform = (params or {}).get("platform")
+        results = pause_all(
+            env,
+            requested_by=by,
+            request_id=req_id,
+            platforms=[Platform(platform)] if platform else None,
+        )
         blocked = [r.blocked for r in results if r.blocked]
         return {
             "status": "blocked" if len(blocked) == len(results) else "done",
@@ -84,9 +97,10 @@ def process_write_requests(env: WriteEnv, *, max_requests: int = 5) -> int:
             req.status = JobRequestStatus.RUNNING.value
             req.started_at = env.now()
             req_id, kind, target, by = req.id, req.kind, req.target_id, req.requested_by
+            params = dict(req.params) if req.params else None
         status, result, error = JobRequestStatus.SUCCESS, None, None
         try:
-            result = _run(env, int(req_id), kind, target, by)
+            result = _run(env, int(req_id), kind, target, by, params)
             if result.get("status") in ("blocked", "failed", "not_found", "skipped"):
                 status, error = (
                     JobRequestStatus.FAILED,

@@ -223,3 +223,15 @@ def test_handler_inside_open_pacing_transaction_does_not_block(world: World) -> 
         put_status(s, CID, pacing_key("meta"), {"x": 1}, world.clock.t)
         [res] = emergency_handler(world.ctx(), s, [DAILY_META], Mode.SUGGEST)
     assert len(res.paused) == 2
+
+
+def test_pause_all_scoped_to_one_platform(world: World) -> None:
+    world.ex(
+        "INSERT INTO write_requests (client_id, kind, dedupe_key, requested_by, params) "
+        "VALUES (:c, 'pause_all', 'pause_all:google', 'admin@test', "
+        '\'{"platform": "google"}\'::jsonb)'
+    )
+    assert process_write_requests(world.env()) == 1
+    assert world.google.state(EntityType.CAMPAIGN, "g1").status is EntityStatus.PAUSED
+    assert meta_status(world, "c1") is EntityStatus.ACTIVE
+    assert world.one("SELECT count(*) FROM emergency_actions WHERE client_id=:c") == 1

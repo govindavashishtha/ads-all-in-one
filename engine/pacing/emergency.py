@@ -251,9 +251,16 @@ def install() -> None:
 # ----------------------------------------------------------------------------- pause-all
 
 
-def pause_all(env: WriteEnv, *, requested_by: str, request_id: int) -> list[PauseResult]:
-    """``POST /control/pause-all`` (via the write_requests queue): both platforms, manual
-    restore. Privileged and spend-reducing: passes the kill switch (§12.3 step 2)."""
+def pause_all(
+    env: WriteEnv,
+    *,
+    requested_by: str,
+    request_id: int,
+    platforms: Sequence[Platform] | None = None,
+) -> list[PauseResult]:
+    """``POST /control/pause-all`` (via the write_requests queue): both platforms unless
+    given, manual restore. Privileged and spend-reducing: passes the kill switch (§12.3
+    step 2)."""
     return [
         pause_platform(
             env,
@@ -263,7 +270,7 @@ def pause_all(env: WriteEnv, *, requested_by: str, request_id: int) -> list[Paus
             key_prefix=f"pause_all:{request_id}:{pl.value}",
             requested_by=requested_by,
         )
-        for pl in Platform
+        for pl in (platforms or list(Platform))
     ]
 
 
