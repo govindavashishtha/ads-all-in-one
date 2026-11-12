@@ -6,8 +6,8 @@
  * routes answer 501 `not_enabled`, and LLM usage reports `llm_enabled: false` before Phase 4.
  */
 import { ApiError, type HttpMethod, type Transport } from "../api";
-import type { JobRequest, Proposal, RankLevel } from "../types";
-import { buildMockDb, jobRequests, MANUAL_JOBS, mockLlmUsage, mockMetrics, mockOverview, mockRankings, mockRules, mockSystem, type MockDb } from "./data";
+import type { DryRun, ExecutionState, JobRequest, Proposal, RankLevel } from "../types";
+import { buildMockDb, executionEnabled, jobRequests, MANUAL_JOBS, mockLlmUsage, mockMetrics, mockOverview, mockRankings, mockRules, mockSystem, nextWriteRequestId, publicWriteRequest, setExecutionEnabled, writeRequests, type MockDb, type MockWriteRequest } from "./data";
 
 const SESSION_KEY = "ads-autopilot:mockSession";
 export const MOCK_PHASE_KEY = "ads-autopilot:mockPhase";
@@ -20,6 +20,9 @@ function getDb(): MockDb {
 /** Test hook. */
 export function resetMockDb(now?: Date): void {
   db = buildMockDb(now ?? new Date());
+  writeRequests.splice(0, writeRequests.length);
+  jobRequests.splice(0, jobRequests.length);
+  setExecutionEnabled(true);
 }
 
 function storage(): Storage | null {
@@ -42,6 +45,37 @@ function mockPhase(): number {
 function notEnabled(phase: string, message: string): never {
   throw new ApiError(501, message, { detail: { code: "not_enabled", phase, message } });
 }
+
+function queueWrite(kind: MockWriteRequest["kind"], dedupeKey: string, targetId: number | null, params: Record<string, unknown> | null = null): MockWriteRequest {
+  const open = writeRequests.find((r) => r.dedupe_key === dedupeKey && (r.status === "queued" || r.status === "running"));
+  if (open) {
+    throw new ApiError(409, `this ${kind} request is already ${open.status}`, { detail: { code: "already_queued", message: `this ${kind} request is already ${open.status}`, request_id: open.id } });
+  }
+  const r: MockWriteRequest = {
+    id: nextWriteRequestId(), kind, target_id: targetId, params, status: "queued",
+    requested_by: "demo", requested_at: new Date().toISOString(),
+    started_at: null, finished_at: null, result: null, error: null, dedupe_key: dedupeKey,
+  };
+  writeRequests.unshift(r);
+  return r;
+}
+
+function publicWrite(r: MockWriteRequest) {
+  return publicWriteRequest(r);
+}
+
+function executionState(): ExecutionState {
+  const enabled = executionEnabled();
+  return {
+    execution_enabled: enabled,
+    mode: "suggest",
+    hard_max_mode: "suggest",
+    kill_switch: false,
+    write_gate_open: enabled,
+    write_gate_reason: enabled ? null : "execution disabled (clients.execution_enabled = false)",
+  };
+}
+
 
 function requireSession(): void {
   if (storage()?.getItem(SESSION_KEY) !== "1") throw new ApiError(401, "Not authenticated");
@@ -115,7 +149,29 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
     if (m) {
       if (phase < 3) notEnabled("3", "Dry-run payloads are built by the executor (Phase 3).");
       const p = d.proposals.find((x) => x.id === Number(m![1]));
-      return { example: true, action: p?.action, params: p?.params, validate_only: true };
+      if (!p) throw new ApiError(404, "Proposal not found");
+      const pause = p.action === "pause";
+      const dry: DryRun = {
+        proposal_id: p.id,
+        action: p.action,
+        status: p.status,
+        guardrail: { result: "allow", approved: true, mode: "suggest", checked_at: new Date().toISOString() },
+        new_daily_budget: pause ? null : "675.00",
+        ops: [{
+          op: pause ? "set_status" : "set_daily_budget",
+          platform: p.platform ?? "meta",
+          entity_type: p.entity_type,
+          external_id: "example",
+          before: pause ? { status: "active" } : { status: "active", daily_budget: "776.25" },
+          intended: pause ? { status: "paused" } : { daily_budget: "675.00" },
+          args: pause ? { status: "paused" } : { daily_budget: "675.00" },
+          would_change: true,
+        }],
+        plan_error: null,
+        execution: executionState(),
+        validate_only: true,
+      };
+      return dry;
     }
     m = path.match(/^\/proposals\/(\d+)$/);
     if (m) {
@@ -124,6 +180,14 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
       return p;
     }
     if (path === "/changes") return phase < 3 ? [] : d.changes;
+    if (path === "/control/execution") return executionState();
+    if (path === "/write-requests") return writeRequests.map(publicWrite);
+    m = path.match(/^\/write-requests\/(\d+)$/);
+    if (m) {
+      const r = writeRequests.find((x) => x.id === Number(m![1]));
+      if (!r) throw new ApiError(404, "write request not found");
+      return publicWrite(r);
+    }
     if (path === "/llm/usage") {
       const u = mockLlmUsage(d, q.get("range") ?? "30d");
       if (phase < 4) return { ...u, llm_enabled: false, provider: null, disabled_reason: "LLM_PROVIDER not set (LLM disabled)", small_model: null, large_model: null, days: [], by_purpose: {}, today: {}, month_to_date: {} };
@@ -164,8 +228,24 @@ async function handle(method: HttpMethod, fullPath: string, body?: unknown): Pro
       const c = d.changes.find((x) => x.id === Number(m![1]));
       if (!c) throw new ApiError(404, "Change not found");
       if (c.status !== "applied") throw new ApiError(409, `Change ${c.id} is ${c.status}`);
-      c.status = "rolled_back";
-      return c;
+      return publicWrite(queueWrite("rollback", `rollback:${c.id}`, c.id, (body as { reason?: string } | undefined) ?? null));
+    }
+    m = path.match(/^\/emergency-actions\/(\d+)\/restore$/);
+    if (m) {
+      if (phase < 3) notEnabled("3", "Restore ships with the executor (Phase 3).");
+      return publicWrite(queueWrite("restore", `restore:${m[1]}`, Number(m[1]), null));
+    }
+    if (path === "/control/pause-all") {
+      if (phase < 3) notEnabled("3", "pause-all ships with the executor (Phase 3).");
+      const b = (body ?? {}) as { platform?: string | null; confirm?: boolean; reason?: string };
+      if (!b.confirm) throw new ApiError(422, "pause-all requires confirm=true");
+      const scope = b.platform ?? "all";
+      return publicWrite(queueWrite("pause_all", `pause_all:${scope}`, null, { platform: b.platform ?? null, reason: b.reason ?? null }));
+    }
+    if (path === "/control/execution") {
+      const b = (body ?? {}) as { enabled?: boolean };
+      setExecutionEnabled(Boolean(b.enabled));
+      return executionState();
     }
   }
 

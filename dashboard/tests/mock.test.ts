@@ -33,9 +33,22 @@ describe("mock transport", () => {
     const r = (await mockTransport("GET", "/rankings?level=ad")) as Rankings;
     expect(r.as_of).toBeNull();
     expect(r.rows).toEqual([]);
-    expect(((await mockTransport("POST", "/changes/14/rollback", {}).catch((x) => x)) as ApiError).notEnabled).toBe(true);
+    expect(((await mockTransport("POST", "/changes/17/rollback", {}).catch((x) => x)) as ApiError).notEnabled).toBe(true);
+    expect(((await mockTransport("GET", "/proposals/41/dry-run").catch((x) => x)) as ApiError).notEnabled).toBe(true);
     expect(((await mockTransport("GET", "/llm/usage?range=30d")) as LlmUsage).llm_enabled).toBe(false);
     expect(await mockTransport("GET", "/system")).toBeTruthy();
+  });
+
+  it("queues a rollback as a write request once Phase 3 is on", async () => {
+    await login();
+    const dry = (await mockTransport("GET", "/proposals/41/dry-run")) as { ops: unknown[]; execution: { write_gate_open: boolean } };
+    expect(dry.ops.length).toBeGreaterThan(0);
+    expect(dry.execution.write_gate_open).toBe(true);
+    const r = (await mockTransport("POST", "/changes/17/rollback", {})) as { id: number; kind: string; status: string };
+    expect(r.kind).toBe("rollback");
+    expect(r.status).toBe("queued");
+    const again = await mockTransport("POST", "/changes/17/rollback", {}).catch((x) => x);
+    expect((again as ApiError).status).toBe(409);
   });
 
   it("approves only proposals that await approval", async () => {

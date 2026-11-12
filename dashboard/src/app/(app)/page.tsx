@@ -10,7 +10,10 @@ import { KpiTrendChart, PaceChart, PlatformSplitChart } from "@/components/chart
 import { KillSwitchBadge, ModeBadge, StatusBadge } from "@/components/badges";
 import { ExampleTag } from "@/components/MockBanner";
 import { QueryState } from "@/components/states";
-import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Skeleton, Stat } from "@/components/ui";
+import { useState } from "react";
+import { api, ApiError } from "@/lib/api";
+import { hasRole, useSession } from "@/components/session";
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Skeleton, Stat } from "@/components/ui";
 
 const label: Record<SpendBlock["platform"], string> = { total: "Total", meta: "Meta", google: "Google" };
 
@@ -41,6 +44,7 @@ function OverviewBody({ v }: { v: OverviewView }) {
                   v.emergency
                     .map((e) => `${humanize(e.platform)} ${humanize(e.trigger)} at ${formatDateTime(e.triggered_at, tz)} (${e.campaign_ids.length} campaigns paused)`)
                     .join("; ")}
+              <RestoreButtons actions={v.emergency} />
             </span>
           )}
         </div>
@@ -192,5 +196,33 @@ export default function OverviewPage() {
         {(v) => <OverviewBody v={v} />}
       </QueryState>
     </>
+  );
+}
+
+function RestoreButtons({ actions }: { actions: import("@/lib/types").EmergencyAction[] }) {
+  const s = useSession();
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!hasRole(s.user, "approver") || actions.length === 0) return msg ? <span className="ml-2 text-xs">{msg}</span> : null;
+  return (
+    <span className="ml-3 inline-flex flex-wrap items-center gap-2">
+      {actions.map((e) => (
+        <Button
+          key={e.id}
+          size="sm"
+          onClick={async () => {
+            if (!window.confirm(`Restore campaigns paused by emergency action #${e.id}?`)) return;
+            try {
+              const req = await api.restoreEmergency(e.id);
+              setMsg(`Queued restore as write request #${req.id}.`);
+            } catch (err) {
+              setMsg(err instanceof ApiError ? err.message : "Restore failed");
+            }
+          }}
+        >
+          Restore #{e.id}
+        </Button>
+      ))}
+      {msg && <span className="text-xs">{msg}</span>}
+    </span>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { api } from "@/lib/api";
+import { useState } from "react";
+import { api, ApiError } from "@/lib/api";
 import { formatDateTime, formatNumber, humanize, relativeTime } from "@/lib/format";
 import { latestRuns } from "@/lib/jobs";
 import type { JobRun } from "@/lib/types";
@@ -10,7 +11,7 @@ import { ExampleTag } from "@/components/MockBanner";
 import { hasRole, useSession } from "@/components/session";
 import { RunJobCard } from "@/components/RunJobCard";
 import { QueryState } from "@/components/states";
-import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Td, Th } from "@/components/ui";
 
 function duration(j: JobRun): string {
   if (!j.finished_at) return "running";
@@ -49,6 +50,14 @@ export default function SystemPage() {
                     <Row k="Kill switch"><KillSwitchBadge state={sys.kill_switch} /></Row>
                     <Row k="Kill switch sources">
                       <span className="text-xs">DB {sys.kill_switch.db ? "on" : "off"} · env {sys.kill_switch.env_override ? "on" : "off"}</span>
+                    </Row>
+                    <Row k="Execution">
+                      <span>
+                        {sys.execution?.execution_enabled ? "on" : "off"}
+                        <span className="ml-2 text-xs text-slate-500">
+                          write gate {sys.execution?.write_gate_open ? "open" : `closed${sys.execution?.write_gate_reason ? ` — ${sys.execution.write_gate_reason}` : ""}`}
+                        </span>
+                      </span>
                     </Row>
                     <Row k="Environment">{sys.app_env}</Row>
                     <Row k="Auth mode">{sys.auth_mode}</Row>
@@ -196,6 +205,15 @@ export default function SystemPage() {
                 )}
               </Card>
 
+              <WritePathCard
+                executionEnabled={Boolean(sys.execution?.execution_enabled)}
+                writeRequests={sys.recent_write_requests ?? []}
+                canAdmin={hasRole(s.user, "admin")}
+                canApprover={hasRole(s.user, "approver")}
+                timezone={tz}
+                onDone={() => q.reload()}
+              />
+
               <RunJobCard
                 jobs={sys.manual_jobs}
                 requests={sys.recent_job_requests ?? []}
@@ -208,5 +226,81 @@ export default function SystemPage() {
         }}
       </QueryState>
     </>
+  );
+}
+
+function WritePathCard({
+  executionEnabled,
+  writeRequests,
+  canAdmin,
+  canApprover,
+  timezone,
+  onDone,
+}: {
+  executionEnabled: boolean;
+  writeRequests: import("@/lib/types").WriteRequest[];
+  canAdmin: boolean;
+  canApprover: boolean;
+  timezone?: string;
+  onDone: () => void;
+}) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run(label: string, fn: () => Promise<unknown>) {
+    setBusy(true);
+    try {
+      const r = await fn();
+      const id = r && typeof r === "object" && "id" in r ? (r as { id: number }).id : null;
+      setMsg(id != null ? `${label} queued as write request #${id}. The engine runs it within about a minute.` : `${label} updated.`);
+      onDone();
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : `${label} failed`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card>
+      <CardHeader title="Write path" subtitle="Platform writes go through the executor (write gate D-28, queue D-29). Nothing is sent from this page." />
+      <CardBody className="space-y-4 text-sm">
+        {msg && <div role="status" className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">{msg}</div>}
+        <div className="flex flex-wrap gap-2">
+          {canAdmin && (
+            <Button size="sm" disabled={busy} onClick={() => run(executionEnabled ? "Disable writes" : "Enable writes", () => api.setExecution(!executionEnabled, "dashboard"))}>
+              {executionEnabled ? "Disable writes" : "Enable writes"}
+            </Button>
+          )}
+          {canApprover && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                if (!window.confirm("Pause every managed, active campaign on both platforms? Restore is manual.")) return;
+                void run("Pause-all", () => api.pauseAll());
+              }}
+            >
+              Pause all
+            </Button>
+          )}
+        </div>
+        <div>
+          <div className="mb-2 font-medium text-slate-700">Recent write requests</div>
+          {writeRequests.length === 0 ? (
+            <span className="text-slate-500">None queued</span>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {writeRequests.map((r) => (
+                <li key={r.id} className="flex flex-wrap gap-2">
+                  <span className="font-medium">#{r.id} {r.kind}</span>
+                  <StatusBadge status={r.status} />
+                  <span className="text-slate-500">{formatDateTime(r.requested_at, timezone)} · {r.requested_by}</span>
+                  {r.error && <span className="text-red-600">{r.error}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </CardBody>
+    </Card>
   );
 }

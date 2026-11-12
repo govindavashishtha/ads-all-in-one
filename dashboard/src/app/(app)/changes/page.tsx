@@ -79,8 +79,8 @@ export default function ChangesPage() {
   async function rollback(c: Change) {
     if (!window.confirm(`Roll back change #${c.id} on ${humanize(c.entity_type)} #${c.entity_id}? If the entity has drifted, a rollback proposal needing approval is created instead.`)) return;
     try {
-      await api.rollback(c.id);
-      setMsg(`Rollback of #${c.id} requested.`);
+      const req = await api.rollback(c.id);
+      setMsg(`Queued rollback of #${c.id} as write request #${req.id}. The engine will run it within about a minute.`);
       q.reload();
     } catch (e) {
       setMsg(

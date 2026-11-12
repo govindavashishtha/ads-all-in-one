@@ -505,8 +505,39 @@ export function mockLlmUsage(db: MockDb, range: string): LlmUsage {
   };
 }
 
-export const MANUAL_JOBS = ["pacing", "hourly_pull", "health_checks", "daily_pipeline", "search_terms", "weekly_strategy", "approval_expiry", "notify_dispatch"];
+export const MANUAL_JOBS = ["pacing", "hourly_pull", "health_checks", "daily_pipeline", "search_terms", "weekly_strategy", "approval_expiry", "notify_dispatch", "emergency_restore", "reconcile", "evaluate", "execute_approved", "token_reset"];
 export const jobRequests: JobRequest[] = [];
+export type MockWriteRequest = {
+  id: number;
+  kind: "rollback" | "restore" | "pause_all";
+  target_id: number | null;
+  params: Record<string, unknown> | null;
+  status: "queued" | "running" | "success" | "failed";
+  requested_by: string;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  dedupe_key: string;
+};
+export const writeRequests: MockWriteRequest[] = [];
+let writeReqSeq = 2000;
+let execEnabled = true;
+export function executionEnabled(): boolean {
+  return execEnabled;
+}
+export function setExecutionEnabled(v: boolean): void {
+  execEnabled = v;
+}
+export function nextWriteRequestId(): number {
+  return writeReqSeq++;
+}
+export function publicWriteRequest(r: MockWriteRequest) {
+  const { dedupe_key, ...rest } = r;
+  void dedupe_key;
+  return rest;
+}
 
 export function mockSystem(db: MockDb): SystemStatus {
   const now = db.now;
@@ -536,5 +567,14 @@ export function mockSystem(db: MockDb): SystemStatus {
     ],
     manual_jobs: MANUAL_JOBS,
     recent_job_requests: jobRequests,
+    execution: {
+      execution_enabled: executionEnabled(),
+      mode: "suggest",
+      hard_max_mode: "suggest",
+      kill_switch: KILL.effective,
+      write_gate_open: executionEnabled() && !KILL.effective,
+      write_gate_reason: executionEnabled() ? (KILL.effective ? "kill switch on" : null) : "execution disabled (clients.execution_enabled = false)",
+    },
+    recent_write_requests: writeRequests.map(publicWriteRequest),
   };
 }

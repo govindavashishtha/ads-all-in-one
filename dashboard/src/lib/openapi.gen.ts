@@ -274,9 +274,39 @@ export interface paths {
         put?: never;
         /**
          * Rollback
-         * @description Manual rollback (§15). Executor path ships in Phase 3 — nothing is changed here.
+         * @description Queue a manual rollback (§15). The engine re-reads the platform: if the state still
+         *     equals the change's result it applies the rollback payload (guarded: steps 1–4, plus caps
+         *     when it increases spend; write gate D-28); if someone changed it since, it creates a
+         *     ``rollback_with_state_drift`` proposal that needs approval. Poll
+         *     ``GET /write-requests/{id}``. Audited.
          */
         post: operations["rollback_api_v1_changes__change_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/control/execution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution
+         * @description The write gate (DECISIONS D-28).
+         */
+        get: operations["get_execution_api_v1_control_execution_get"];
+        put?: never;
+        /**
+         * Set Execution
+         * @description Turn platform writes on/off (``clients.execution_enabled``, default off; D-28). The
+         *     master switch for every write: approved proposals, emergency stop, pause-all, rollback,
+         *     restore. Turning it on does not raise the mode or ``HARD_MAX_MODE``. Audited.
+         */
+        post: operations["set_execution_api_v1_control_execution_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -334,8 +364,12 @@ export interface paths {
         put?: never;
         /**
          * Pause All
-         * @description Emergency pause of managed campaigns (§12.4). Needs the executor's emergency path and a
-         *     write credential, which are installed only after the Phase 3 gate.
+         * @description Queue a pause of every managed, active campaign (§12.4; both platforms unless
+         *     ``platform`` is given). Runs in the engine via the executor's emergency path (privileged,
+         *     spend-reducing: passes the kill switch) and is recorded as an ``emergency_actions`` row
+         *     with ``restore_policy = manual``. Nothing is written while the write gate is closed
+         *     (``execution_enabled`` off / read_only); then pause in Ads Manager / Google Ads — native
+         *     account limits are the hard backstop (§12.5). Audited.
          */
         post: operations["pause_all_api_v1_control_pause_all_post"];
         delete?: never;
@@ -372,7 +406,10 @@ export interface paths {
         put?: never;
         /**
          * Restore Emergency
-         * @description Restore campaigns paused by an emergency action (§12.4 step 6). Phase 3.
+         * @description Queue a restore of the campaigns an emergency action paused (§12.4 step 6). The engine
+         *     re-enables a campaign only if it is still PAUSED and its last ``entity_history`` row has
+         *     ``source = emergency``; requires kill switch off, mode ≠ read_only, no monthly-cap breach
+         *     and an open write gate. Poll ``GET /write-requests/{id}`` for the result. Audited.
          */
         post: operations["restore_emergency_api_v1_emergency_actions__action_id__restore_post"];
         delete?: never;
@@ -467,7 +504,8 @@ export interface paths {
          *     ``job_requests`` row that the engine scheduler picks up within about a minute (poll it via
          *     ``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request
          *     per job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a
-         *     no-op. Nothing here writes to an ad platform.
+         *     no-op. Jobs that can write to a platform do so only through the executor (write gate +
+         *     guardrail).
          */
         post: operations["run_job_api_v1_jobs__name__run_post"];
         delete?: never;
@@ -656,7 +694,10 @@ export interface paths {
         };
         /**
          * Dry Run
-         * @description Payload that would be sent to the platform. Built by the executor (Phase 3).
+         * @description The writes the executor would send for this proposal (§17): guardrail re-run with
+         *     ``approved=true`` on fresh DB state, then the planned ops with ``before`` as last synced.
+         *     The platform is not called and nothing is changed (the executor itself re-reads the
+         *     platform and sends a validate-only request first).
          */
         get: operations["dry_run_api_v1_proposals__proposal_id__dry_run_get"];
         put?: never;
@@ -739,6 +780,40 @@ export interface paths {
          * @description Job runs by step, last sync times, staleness (connector health proxy).
          */
         get: operations["system_api_v1_system_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/write-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Write Requests */
+        get: operations["list_write_requests_api_v1_write_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/write-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Write Request */
+        get: operations["get_write_request_api_v1_write_requests__request_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1199,6 +1274,65 @@ export interface components {
             /** Status */
             status?: string | null;
         };
+        /** DryRunOp */
+        DryRunOp: {
+            /** Args */
+            args: {
+                [key: string]: unknown;
+            };
+            /**
+             * Before
+             * @description as last synced (not read live)
+             */
+            before: {
+                [key: string]: unknown;
+            } | null;
+            entity_type: components["schemas"]["EntityType"];
+            /** External Id */
+            external_id: string;
+            /** Intended */
+            intended: {
+                [key: string]: unknown;
+            };
+            /** Op */
+            op: string;
+            platform: components["schemas"]["Platform"];
+            /** Would Change */
+            would_change: boolean;
+        };
+        /**
+         * DryRunResponse
+         * @description What the executor would send (§17 dry-run). Built from DB state; the platform is not
+         *     called and nothing is changed.
+         */
+        DryRunResponse: {
+            /** Action */
+            action: string;
+            execution: components["schemas"]["ExecutionState"];
+            /**
+             * Guardrail
+             * @description guardrail re-run now with approved=true
+             */
+            guardrail: {
+                [key: string]: unknown;
+            };
+            /** New Daily Budget */
+            new_daily_budget?: string | null;
+            /** Ops */
+            ops?: components["schemas"]["DryRunOp"][];
+            /** Plan Error */
+            plan_error?: string | null;
+            /** Proposal Id */
+            proposal_id: number;
+            /** Status */
+            status: string;
+            /**
+             * Validate Only
+             * @description the executor also sends a validate-only request before applying
+             * @default true
+             */
+            validate_only: boolean;
+        };
         /** EmergencyActionOut */
         EmergencyActionOut: {
             /** Campaign Ids */
@@ -1259,6 +1393,35 @@ export interface components {
             unit_entity_type: components["schemas"]["EntityType"];
             /** Verdict */
             verdict: string | null;
+        };
+        /** ExecutionRequest */
+        ExecutionRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * ExecutionState
+         * @description The write gate (DECISIONS D-28): platform writes happen only when it is open.
+         */
+        ExecutionState: {
+            /**
+             * Execution Enabled
+             * @description clients.execution_enabled (default false)
+             */
+            execution_enabled: boolean;
+            hard_max_mode: components["schemas"]["Mode"];
+            /** Kill Switch */
+            kill_switch: boolean;
+            mode: components["schemas"]["Mode"];
+            /**
+             * Write Gate Open
+             * @description open for spend-increasing writes
+             */
+            write_gate_open: boolean;
+            /** Write Gate Reason */
+            write_gate_reason?: string | null;
         };
         /**
          * GuardrailResultOut
@@ -1670,26 +1833,6 @@ export interface components {
             hard_max_mode: components["schemas"]["Mode"];
             mode: components["schemas"]["Mode"];
         };
-        /** NotEnabledDetail */
-        NotEnabledDetail: {
-            /**
-             * Code
-             * @default not_enabled
-             * @constant
-             */
-            code: "not_enabled";
-            /** Message */
-            message: string;
-            /**
-             * Phase
-             * @description Plan phase (§23) that enables this endpoint
-             */
-            phase: string;
-        };
-        /** NotEnabledResponse */
-        NotEnabledResponse: {
-            detail: components["schemas"]["NotEnabledDetail"];
-        };
         /** OverviewResponse */
         OverviewResponse: {
             /** Active Emergency Actions */
@@ -1750,7 +1893,10 @@ export interface components {
              * @default false
              */
             confirm: boolean;
+            /** @description omit = both platforms */
             platform?: components["schemas"]["Platform"] | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * Platform
@@ -1990,6 +2136,11 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** RestoreRequest */
+        RestoreRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
         /**
          * Risk
          * @enum {string}
@@ -2001,6 +2152,11 @@ export interface components {
          * @enum {string}
          */
         Role: "viewer" | "approver" | "admin";
+        /** RollbackRequest */
+        RollbackRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
         /** ScoreOut */
         ScoreOut: {
             /** Aov Shrunk */
@@ -2140,6 +2296,7 @@ export interface components {
             auth_mode: string;
             /** Client Id */
             client_id: string;
+            execution?: components["schemas"]["ExecutionState"] | null;
             hard_max_mode: components["schemas"]["Mode"];
             heartbeat: components["schemas"]["HeartbeatOut"];
             kill_switch: components["schemas"]["KillSwitchState"];
@@ -2157,6 +2314,8 @@ export interface components {
             recent_failures: components["schemas"]["JobRunOut"][];
             /** Recent Job Requests */
             recent_job_requests?: components["schemas"]["JobRequestOut"][];
+            /** Recent Write Requests */
+            recent_write_requests?: components["schemas"]["WriteRequestOut"][];
             /**
              * Server Time
              * Format: date-time
@@ -2304,6 +2463,46 @@ export interface components {
              * @enum {string}
              */
             field: "daily_budget" | "status" | "negative_keyword" | "creative" | "campaign" | "none";
+        };
+        /**
+         * WriteRequestKind
+         * @description API → engine queue for platform writes the API may not perform itself (0004).
+         * @enum {string}
+         */
+        WriteRequestKind: "rollback" | "restore" | "pause_all";
+        /**
+         * WriteRequestOut
+         * @description A platform write queued by the API (``write_requests`` row, migration 0004) — run by
+         *     the engine's executor within about a minute, never by the API (DECISIONS D-29).
+         */
+        WriteRequestOut: {
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["WriteRequestKind"];
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Started At */
+            started_at: string | null;
+            status: components["schemas"]["JobRequestStatus"];
+            /** Target Id */
+            target_id: number | null;
         };
     };
     responses: never;
@@ -2749,16 +2948,27 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RollbackRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WriteRequestOut"];
                 };
+            };
+            /** @description not applied, or a rollback is already queued */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2769,13 +2979,57 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Not enabled in this phase */
-            501: {
+        };
+    };
+    get_execution_api_v1_control_execution_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotEnabledResponse"];
+                    "application/json": components["schemas"]["ExecutionState"];
+                };
+            };
+        };
+    };
+    set_execution_api_v1_control_execution_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2860,13 +3114,20 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WriteRequestOut"];
                 };
+            };
+            /** @description the same request is already queued/running, or not applicable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2875,15 +3136,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Not enabled in this phase */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotEnabledResponse"];
                 };
             };
         };
@@ -2929,16 +3181,27 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RestoreRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WriteRequestOut"];
                 };
+            };
+            /** @description the same request is already queued/running, or not applicable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2947,15 +3210,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Not enabled in this phase */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotEnabledResponse"];
                 };
             };
         };
@@ -3111,15 +3365,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Not enabled in this phase */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotEnabledResponse"];
                 };
             };
         };
@@ -3501,7 +3746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DryRunResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3511,15 +3756,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Not enabled in this phase */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotEnabledResponse"];
                 };
             };
         };
@@ -3662,6 +3898,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemResponse"];
+                };
+            };
+        };
+    };
+    list_write_requests_api_v1_write_requests_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteRequestOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_write_request_api_v1_write_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteRequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

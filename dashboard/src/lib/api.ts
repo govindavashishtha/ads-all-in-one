@@ -29,6 +29,9 @@ import type {
   Rankings,
   SystemStatus,
   User,
+  WriteRequest,
+  ExecutionState,
+  DryRun,
 } from "./types";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -221,10 +224,20 @@ export const api = {
   approveBatch: (ids: number[], comment?: string) =>
     call<BatchDecisionResponse>("POST", "/proposals/approve-batch", { ids, comment: comment ?? null }),
 
-  /* Phase 3 (501 until the executor ships) */
-  dryRun: (id: number) => call<Record<string, unknown>>("GET", `/proposals/${id}/dry-run`),
+  /* Phase 3 write path (dry-run is a GET; rollback/restore/pause-all return 202 WriteRequest) */
+  dryRun: (id: number) => call<DryRun>("GET", `/proposals/${id}/dry-run`),
   changes: async (since?: string) => unwrapList<Change>(await call("GET", `/changes${qs({ since })}`)),
-  rollback: (id: number) => call<unknown>("POST", `/changes/${id}/rollback`),
+  rollback: (id: number, reason?: string) =>
+    call<WriteRequest>("POST", `/changes/${id}/rollback`, { reason: reason ?? null }),
+  restoreEmergency: (id: number, reason?: string) =>
+    call<WriteRequest>("POST", `/emergency-actions/${id}/restore`, { reason: reason ?? null }),
+  pauseAll: (platform?: Platform, reason?: string) =>
+    call<WriteRequest>("POST", "/control/pause-all", { platform: platform ?? null, confirm: true, reason: reason ?? null }),
+  execution: () => call<ExecutionState>("GET", "/control/execution"),
+  setExecution: (enabled: boolean, reason?: string) =>
+    call<ExecutionState>("POST", "/control/execution", { enabled, reason: reason ?? null }),
+  writeRequests: async (limit = 50) => unwrapList<WriteRequest>(await call("GET", `/write-requests${qs({ limit })}`)),
+  writeRequest: (id: number) => call<WriteRequest>("GET", `/write-requests/${id}`),
 
   /* Phase 4 */
   llmUsage: (range = "30d") => call<LlmUsage>("GET", `/llm/usage${qs({ range })}`),

@@ -68,9 +68,12 @@ export type AdAccount = S["AdAccountOut"];
 export type Heartbeat = S["HeartbeatOut"];
 export type PlatformOperations = S["PlatformOperationsOut"];
 export type JobRequest = S["JobRequestOut"];
+export type WriteRequest = S["WriteRequestOut"];
+export type ExecutionState = S["ExecutionState"];
+export type DryRun = S["DryRunResponse"];
+export type DryRunOp = S["DryRunOp"];
 
 export type ConfigResponse = S["ConfigResponse"];
-export type NotEnabledDetail = S["NotEnabledDetail"];
 
 /** Objective + targets of the active rules version (§11.2); from `overview.targets` /
  * `rankings.targets`, or parsed from `GET /rules` (session-wide default). */
