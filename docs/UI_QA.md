@@ -7,6 +7,11 @@ platforms). Driven through the Playwright MCP at
 Admin is the env user; viewer is the same user down-scoped to a browser
 session (`AUTH_MODE=env` has a single login). No live Meta/Google calls.
 
+A second pass the same morning (11:03 Asia/Kolkata) fixed the remaining
+no-decision lows (QA-9 favicon, QA-11 peer-group labels, QA-12 ad format,
+QA-13 money). QA-10 (dry-run JSON), D-10, and the demo-clock vs wall-clock
+mismatch are still open on purpose.
+
 Stack start/stop and PIDs: [LOCAL_STACK.md](LOCAL_STACK.md).
 Screenshots: `/workspace/ads-autopilot-screens/qa-*.png`.
 
@@ -20,7 +25,7 @@ because `APP_ENV=development`. They are not Govinda’s I-1 / I-2 answers.
 |---|---:|---:|---:|
 | High     | 0 | 0 | 0 |
 | Medium   | 6 | 6 | 0 |
-| Low      | 8 | 3 | 5 |
+| Low      | 8 | 7 | 1 |
 
 ## Findings
 
@@ -113,15 +118,22 @@ because `APP_ENV=development`. They are not Govinda’s I-1 / I-2 answers.
 - **Screenshot:** `qa-30-executed-empty.png` (after)
 - **Fix:** Tab-specific title and “Decisions and executions will show up here.”
 
-### QA-9 — Missing favicon at the site root (low) — **open**
+### QA-9 — Missing favicon at the site root (low) — **fixed**
 
 - **Page:** Every page (browser requests `http://localhost:8080/favicon.ico`)
 - **Expected:** An icon, or a 204, without a console 404.
-- **Actual:** Caddy’s default handler returns 404 for `/favicon.ico` (it is
-  outside `/ads-autopilot`). One console error on every load.
-- **Screenshot:** `qa-01-login.png`
-- **Why open:** Fixing it means a Caddy route and/or a document icon under
-  `basePath`. Left as a small proxy/asset follow-up, not a product-logic bug.
+- **Actual (before):** Caddy’s default handler returned 404 for `/favicon.ico`
+  (outside `/ads-autopilot`). One console error on every load.
+- **Fix:** Ship `dashboard/public/icon.svg` and `favicon.ico` (bar-chart mark).
+  Layout metadata points at `${BASE_PATH}/icon.svg` and `${BASE_PATH}/favicon.ico`.
+  Caddy rewrites origin-root `/favicon.ico` and `/icon.svg` to the same files
+  under `/ads-autopilot`, because Chromium still requests the origin root.
+- **Re-check (Playwright MCP + curl, 12 Nov 2026 11:03 Asia/Kolkata):**
+  `http://localhost:8080/favicon.ico`, `/icon.svg`,
+  `/ads-autopilot/favicon.ico`, and `/ads-autopilot/icon.svg` all return 200.
+  Login HTML has `<link rel="icon" href="/ads-autopilot/icon.svg">` and
+  `/ads-autopilot/favicon.ico`. No favicon 404s in the session.
+- **Screenshot:** `qa-01-login.png` (before)
 
 ### QA-10 — Dry-run card exposes the API path and raw JSON (low) — **open**
 
@@ -134,36 +146,66 @@ because `APP_ENV=development`. They are not Govinda’s I-1 / I-2 answers.
 - **Why open:** Could be hidden behind an “Show payload” toggle; needs a
   product call on how technical the dry-run card should be.
 
-### QA-11 — Peer-group headers show raw keys (low) — **open**
+### QA-11 — Peer-group headers show raw keys (low) — **fixed**
 
 - **Page:** Rankings
 - **Expected:** A readable group label (e.g. “Ads in SYN ad set 910001”).
-- **Actual:** `Peer group: ad|ad_group:1 · 2 entities` (grammar fixed in QA-7;
-  the key itself is still raw).
-- **Screenshot:** `qa-27-rankings-fixed.png`
-- **Why open:** Cosmetic; the parent line under each entity already names
-  the ad set / campaign.
+- **Actual (before):** `Peer group: ad|ad_group:1 · 2 entities` (grammar fixed
+  in QA-7; the key itself was still raw).
+- **Fix:** `peerGroupLabel` / `peerGroupDescription` parse the engine key
+  (`ad|ad_group:N`, `ad_group|campaign:N`, `keyword|ad_group:N|match:…`,
+  `campaign|{platform}|objective:…`) and use the row’s `parent_name` /
+  `campaign_name` / platform. Meta containers are “ad set(s)”, Google
+  “ad group(s)”. The raw key stays in the header cell’s `title` tooltip.
+- **Re-check (Playwright MCP):** Ads → “Ads in SYN ad set 910001 · 2 entities”
+  (`title=ad|ad_group:1`); Ad sets / ad groups → “Ad sets in SYN Prospecting
+  (CBO) · 2 entities” and “Ad groups in SYN Brand Search · 1 entity”;
+  Keywords → “Keywords in SYN ad group 810001 · broad match · 1 entity”;
+  Campaigns → “Meta campaigns · Sales · 3 entities”, “Google campaigns ·
+  Search · 2 entities”, “Google campaigns · Performance Max · 1 entity”.
+- **Screenshot:** `qa-27-rankings-fixed.png` (before), `qa-34-rankings-peergroups.png` (after)
 
-### QA-12 — Ad format shown as `SHARE` (low) — **open**
+### QA-12 — Ad format shown as `SHARE` (low) — **fixed**
 
 - **Page:** Campaign detail → expanded ad set
-- **Expected:** A human creative format (or “—” if unknown).
-- **Actual:** Raw `SHARE` (Meta object/creative type) because `humanize()`
-  only capitalises the first character of an already-uppercase token.
-- **Screenshot:** `qa-04-campaign-detail.png`
-- **Why open:** Display-only; changing `humanize()` globally needs a careful
-  pass over every call site.
+- **Expected:** A human creative format (or “—” if unknown), with the raw
+  platform value available somewhere.
+- **Actual (before):** Raw `SHARE` (Meta `creative.object_type`) because
+  `humanize()` only capitalises the first character of an already-uppercase
+  token. Google ads showed `RESPONSIVE_SEARCH_AD` the same way.
+- **Fix:** New `adFormatLabel()` maps known Meta `object_type` and Google
+  `AdType` values (SHARE → “Link”, PHOTO → “Single image”,
+  RESPONSIVE_SEARCH_AD → “Responsive search ad”; unknown tokens are
+  title-cased). Campaign detail renders the friendly label with
+  `title={raw}`. `humanize()` is unchanged so other call sites are untouched.
+- **Re-check (Playwright MCP):** SYN Prospecting (CBO) ads show “Link” with
+  tooltip `SHARE`; SYN Brand Search ads show “Responsive search ad” with
+  tooltip `RESPONSIVE_SEARCH_AD`. Visible text no longer contains the raw tokens.
+- **Screenshot:** `qa-04-campaign-detail.png` (before),
+  `qa-35-campaign-meta-format.png` / `qa-36-campaign-google-format.png` (after)
 
-### QA-13 — Money formatting mixes `₹2,000` and `₹500.00` (low) — **open**
+### QA-13 — Money formatting mixes `₹2,000` and `₹500.00` (low) — **fixed**
 
-- **Page:** Campaigns list / campaign detail
-- **Expected:** One rule (whole rupees vs always two decimals).
-- **Actual:** `formatMoney` drops `.00` for some amounts and keeps it for
-  others (e.g. ₹2,000 vs ₹500.00). Indian grouping itself (`₹5,50,000`) is
-  correct for `en-IN`.
-- **Screenshot:** `qa-03-campaigns-desktop.png`
-- **Why open:** Formatter behaviour is already tested; changing it would
-  ripple through every money cell. Not wrong, just uneven.
+- **Page:** Campaigns list / campaign detail (and every other money cell)
+- **Expected:** One documented rule (always two decimals, or always none).
+- **Actual (before):** `formatMoney` dropped fraction digits when
+  `|amount| >= 1000` (`₹2,000` vs `₹500.00`; USD `1234.5` rounded to `$1,235`).
+  Indian grouping itself (`₹5,50,000`) was already correct for `en-IN`.
+- **Fix / rule:** One shared formatter, documented on `formatMoney` in
+  `dashboard/src/lib/format.ts`. Major currency units always show exactly two
+  decimal places, including trailing zeros (`₹2,000.00`, `₹500.00`,
+  `$1,234.50`, `₹1,29,670.00`, `₹5,50,000.00`), matching BUILD_PLAN §0 / §8
+  (Decimal, major units, 2 dp outside connectors). `opts.decimals` overrides;
+  `opts.compact` remains for chart axis ticks only (compact notation, 1
+  fraction digit). Tests updated to the same rule.
+- **Re-check (Playwright MCP, desktop + 390px):** Overview, Campaigns, Rankings,
+  and campaign detail show only two-decimal amounts (e.g. daily budget
+  `₹2,000.00` / `₹3,000.00` next to target CPA `₹500.00`; monthly cap
+  `₹5,50,000.00`). No leftover whole-rupee amounts. Chart axis ticks still use
+  compact `1.7K`-style labels. No page-level overflow at 390px.
+- **Screenshot:** `qa-03-campaigns-desktop.png` (before),
+  `qa-33-overview-money.png`, `qa-36-campaign-google-format.png`,
+  `qa-37-campaigns-390.png` (after)
 
 ## Verified (not bugs)
 

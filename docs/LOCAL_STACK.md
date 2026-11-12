@@ -25,7 +25,7 @@ The env admin is `admin`. A down-scoped viewer *browser* session can be
 re-issued with `uv run python /tmp/ui-demo/issue_viewer_session.py` after
 sourcing the env file (writes `/tmp/ui-demo/viewer.session`).
 
-## PIDs (as of 12 Nov 2026, 10:55 Asia/Kolkata)
+## PIDs (as of 12 Nov 2026, 11:03 Asia/Kolkata)
 
 Recorded in `/tmp/ui-demo/pids` as well.
 
@@ -37,7 +37,7 @@ Recorded in `/tmp/ui-demo/pids` as well.
 | uvicorn | 339901 | `:8000 --root-path /ads-autopilot --proxy-headers --forwarded-allow-ips 127.0.0.1` |
 | Dev engine wrapper | 339874 | |
 | Dev engine | 339902 | `scripts/run_dev_engine.py` (fixtures + FakeWriteClients) |
-| Dashboard (`next start`) | 346122 | `:3000`, real build (`NEXT_PUBLIC_MOCK_API` unset) |
+| Dashboard (`next start`) | 355939 | `:3000`, real build (`NEXT_PUBLIC_MOCK_API` unset). Restarted after the favicon / label / money rebuild; Caddy was reloaded in place (same PID 104058) to pick up `/favicon.ico` and `/icon.svg` rewrites. |
 
 Logs: `/tmp/ui-demo/api.log`, `/tmp/ui-demo/engine.log`, `/tmp/ui-demo/dash.log`.
 
@@ -86,7 +86,7 @@ It never loads platform credentials.
 
 ```bash
 # API + engine + dashboard only (leave Postgres and Caddy if other work needs them)
-kill 339868 339901 339874 339902 346122
+kill 339868 339901 339874 339902 355939
 # or, if PIDs have changed:
 #   kill $(awk -F= '/^(api|engine|dash)/{print $2}' /tmp/ui-demo/pids)
 ```
