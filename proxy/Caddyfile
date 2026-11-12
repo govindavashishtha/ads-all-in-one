@@ -19,6 +19,17 @@
 		reverse_proxy dashboard:3000
 	}
 
+	# Browsers still request /favicon.ico at the origin root, even when the
+	# app lives under /ads-autopilot. Serve the same icon the dashboard ships.
+	handle /favicon.ico {
+		rewrite * /ads-autopilot/favicon.ico
+		reverse_proxy dashboard:3000
+	}
+	handle /icon.svg {
+		rewrite * /ads-autopilot/icon.svg
+		reverse_proxy dashboard:3000
+	}
+
 	handle {
 		respond "Not found" 404
 	}

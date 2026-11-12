@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { accountStatusLabel, capRatio, formatMoney, formatPct, formatRoas, localDateMinus, paceTone, pluralize, toNum } from "@/lib/format";
+import { accountStatusLabel, adFormatLabel, capRatio, formatMoney, formatPct, formatRoas, localDateMinus, paceTone, pluralize, toNum } from "@/lib/format";
 
 describe("format", () => {
   it("formats INR with Indian digit grouping from the account currency", () => {
-    expect(formatMoney("129670.00", "INR")).toBe("₹1,29,670");
+    expect(formatMoney("129670.00", "INR")).toBe("₹1,29,670.00");
     expect(formatMoney("406.77", "INR")).toBe("₹406.77");
+    expect(formatMoney("2000", "INR")).toBe("₹2,000.00");
+    expect(formatMoney("500", "INR")).toBe("₹500.00");
   });
-  it("does not hardcode the currency", () => {
-    expect(formatMoney(1234.5, "USD")).toMatch(/\$1,235|US\$1,235/);
+  it("does not hardcode the currency and always uses 2 decimal places", () => {
+    expect(formatMoney(1234.5, "USD")).toMatch(/\$1,234\.50|US\$1,234\.50/);
     expect(formatMoney(12, "EUR")).toContain("12.00");
+    expect(formatMoney(2000, "USD")).toMatch(/\$2,000\.00|US\$2,000\.00/);
   });
   it("handles missing values", () => {
     expect(formatMoney(null, "INR")).toBe("—");
@@ -54,5 +57,21 @@ describe("pluralize and account status", () => {
     expect(accountStatusLabel("ENABLED", "google")).toBe("ENABLED");
     expect(accountStatusLabel("1", "google")).toBe("1");
     expect(accountStatusLabel(null, "meta")).toBeNull();
+  });
+});
+
+
+describe("adFormatLabel", () => {
+  it("maps Meta object_type and Google ad type to friendly labels", () => {
+    expect(adFormatLabel("SHARE")).toBe("Link");
+    expect(adFormatLabel("PHOTO")).toBe("Single image");
+    expect(adFormatLabel("VIDEO")).toBe("Video");
+    expect(adFormatLabel("RESPONSIVE_SEARCH_AD")).toBe("Responsive search ad");
+    expect(adFormatLabel("EXPANDED_TEXT_AD")).toBe("Expanded text ad");
+  });
+  it("title-cases unknown tokens and treats empty as a dash", () => {
+    expect(adFormatLabel("SOME_NEW_TYPE")).toBe("Some New Type");
+    expect(adFormatLabel(null)).toBe("—");
+    expect(adFormatLabel("")).toBe("—");
   });
 });

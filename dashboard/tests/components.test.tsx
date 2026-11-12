@@ -48,7 +48,7 @@ describe("BudgetGauge", () => {
     render(<BudgetGauge label="Meta" spend="11000" cap="12000" currency="INR" />);
     expect(screen.getByText("92%")).toBeInTheDocument();
     expect(screen.getByTestId("budget-gauge")).toHaveAttribute("data-tone", "warn");
-    expect(screen.getByText(/₹11,000/)).toBeInTheDocument();
+    expect(screen.getByText(/₹11,000\.00/)).toBeInTheDocument();
   });
   it("handles a missing cap", () => {
     render(<BudgetGauge label="Total" spend="100" cap={null} currency="INR" />);
@@ -97,8 +97,8 @@ describe("ProposalCard", () => {
     });
     const onDecided = vi.fn();
     render(<ProposalCard p={proposal} currency="INR" canDecide onDecided={onDecided} />);
-    expect(screen.getByText("₹2,500")).toBeInTheDocument();
-    expect(screen.getByText("₹2,875")).toBeInTheDocument();
+    expect(screen.getByText("₹2,500.00")).toBeInTheDocument();
+    expect(screen.getByText("₹2,875.00")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(onDecided).toHaveBeenCalled());
     expect(onDecided.mock.calls[0][0].proposal.status).toBe("approved");

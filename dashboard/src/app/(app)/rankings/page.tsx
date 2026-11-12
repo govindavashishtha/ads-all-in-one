@@ -53,8 +53,8 @@ function RankTable({ data, targets, currency, showLow }: { data: Rankings; targe
             return [
               header ? (
                 <tr key={`h-${r.peer_group}-${i}`} className="bg-slate-50">
-                  <td colSpan={8} className="px-3 py-1.5 text-xs font-medium text-slate-500">
-                    {peerGroupLabel(r.peer_group, r.peer_size)}
+                  <td colSpan={8} className="px-3 py-1.5 text-xs font-medium text-slate-500" title={r.peer_group ?? undefined}>
+                    {peerGroupLabel(r.peer_group, r.peer_size, r)}
                   </td>
                 </tr>
               ) : null,

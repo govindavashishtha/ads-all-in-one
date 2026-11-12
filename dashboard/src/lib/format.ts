@@ -26,6 +26,15 @@ function nf(locale: string | undefined, opts: Intl.NumberFormatOptions): Intl.Nu
   return f;
 }
 
+/**
+ * Format a money amount in major currency units.
+ *
+ * Rule (BUILD_PLAN §0 / §8: money is Decimal, major units, 2 dp outside connectors):
+ * always show exactly two decimal places, including trailing zeros
+ * (`₹2,000.00`, `₹500.00`, `$1,234.50`). Grouping follows the account
+ * currency's locale (Indian grouping for INR). Override with `opts.decimals`.
+ * `opts.compact` is for chart axis ticks only (compact notation, 1 fraction digit).
+ */
 export function formatMoney(
   v: Money | null | undefined,
   currency: string | null | undefined,
@@ -33,14 +42,17 @@ export function formatMoney(
 ): string {
   const n = toNum(v);
   if (n === null) return "—";
-  if (!currency) return nf(undefined, { maximumFractionDigits: opts.decimals ?? 2 }).format(n);
+  const decimals = opts.decimals ?? 2;
+  if (!currency) {
+    return nf(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+  }
   const o: Intl.NumberFormatOptions = { style: "currency", currency };
   if (opts.compact) {
     o.notation = "compact";
     o.maximumFractionDigits = 1;
   } else {
-    o.minimumFractionDigits = opts.decimals ?? (Math.abs(n) >= 1000 ? 0 : 2);
-    o.maximumFractionDigits = opts.decimals ?? (Math.abs(n) >= 1000 ? 0 : 2);
+    o.minimumFractionDigits = decimals;
+    o.maximumFractionDigits = decimals;
   }
   return nf(localeFor(currency), o).format(n);
 }
@@ -182,4 +194,53 @@ export function accountStatusLabel(status: string | null | undefined, platform?:
   if (status == null || status === "") return null;
   if (platform === "meta" && META_ACCOUNT_STATUS[status] != null) return META_ACCOUNT_STATUS[status];
   return status;
+}
+
+
+/**
+ * Friendly label for an ad `format` stored from the platform
+ * (Meta `creative.object_type`, Google `ad.type`). The raw value is kept
+ * for tooltips by the caller.
+ */
+const AD_FORMAT_LABELS: Record<string, string> = {
+  // Meta AdCreative.object_type
+  SHARE: "Link",
+  PHOTO: "Single image",
+  VIDEO: "Video",
+  STATUS: "Text",
+  DOMAIN: "Link",
+  EVENT: "Event",
+  OFFER: "Offer",
+  APPLICATION: "App",
+  PAGE: "Page",
+  STORE_ITEM: "Store item",
+  MUSIC: "Music",
+  INVALID: "Unknown",
+  // Google AdType
+  RESPONSIVE_SEARCH_AD: "Responsive search ad",
+  EXPANDED_TEXT_AD: "Expanded text ad",
+  RESPONSIVE_DISPLAY_AD: "Responsive display ad",
+  APP_AD: "App ad",
+  VIDEO_AD: "Video ad",
+  IMAGE_AD: "Image ad",
+  TEXT_AD: "Text ad",
+  CALL_AD: "Call ad",
+  HOTEL_AD: "Hotel ad",
+  SMART_CAMPAIGN_AD: "Smart campaign ad",
+  DEMAND_GEN_MULTI_ASSET_AD: "Demand Gen ad",
+  DEMAND_GEN_VIDEO_RESPONSIVE_AD: "Demand Gen video ad",
+  DEMAND_GEN_CAROUSEL_AD: "Demand Gen carousel ad",
+  DEMAND_GEN_PRODUCT_AD: "Demand Gen product ad",
+};
+
+function titleCaseToken(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function adFormatLabel(format: string | null | undefined): string {
+  if (format == null || format === "") return "—";
+  return AD_FORMAT_LABELS[format] ?? AD_FORMAT_LABELS[format.toUpperCase()] ?? titleCaseToken(format);
 }

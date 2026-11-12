@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Fragment, useState } from "react";
 import { api } from "@/lib/api";
-import { formatMoney, formatNumber, formatPct, humanize, localDateMinus } from "@/lib/format";
+import { adFormatLabel, formatMoney, formatNumber, formatPct, humanize, localDateMinus } from "@/lib/format";
 import type { AdGroup } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
@@ -48,7 +48,7 @@ function AdsRow({ group, colSpan, currency, target }: { group: AdGroup; colSpan:
                         {a.headline && <div className="max-w-xs truncate text-xs text-slate-500">{a.headline}</div>}
                       </Td>
                       <Td><StatusBadge status={a.status} /></Td>
-                      <Td>{humanize(a.format ?? "—")}</Td>
+                      <Td>{a.format ? <span title={a.format}>{adFormatLabel(a.format)}</span> : adFormatLabel(null)}</Td>
                       <Td className="text-right tabular-nums">{formatMoney(a.metrics?.spend, currency)}</Td>
                       <Td className="text-right tabular-nums">{formatPct(a.metrics?.ctr, 2)}</Td>
                       <Td className="text-right tabular-nums">{formatNumber(a.metrics?.conversions, 1)}</Td>
