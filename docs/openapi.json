@@ -1587,6 +1587,133 @@
         "title": "DecisionResult",
         "type": "object"
       },
+      "DryRunOp": {
+        "properties": {
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "as last synced (not read live)",
+            "title": "Before"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "intended": {
+            "additionalProperties": true,
+            "title": "Intended",
+            "type": "object"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/Platform"
+          },
+          "would_change": {
+            "title": "Would Change",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "op",
+          "platform",
+          "entity_type",
+          "external_id",
+          "before",
+          "intended",
+          "args",
+          "would_change"
+        ],
+        "title": "DryRunOp",
+        "type": "object"
+      },
+      "DryRunResponse": {
+        "description": "What the executor would send (\u00a717 dry-run). Built from DB state; the platform is not\ncalled and nothing is changed.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionState"
+          },
+          "guardrail": {
+            "additionalProperties": true,
+            "description": "guardrail re-run now with approved=true",
+            "title": "Guardrail",
+            "type": "object"
+          },
+          "new_daily_budget": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Daily Budget"
+          },
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunOp"
+            },
+            "title": "Ops",
+            "type": "array"
+          },
+          "plan_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Error"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "validate_only": {
+            "default": true,
+            "description": "the executor also sends a validate-only request before applying",
+            "title": "Validate Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "action",
+          "status",
+          "guardrail",
+          "execution"
+        ],
+        "title": "DryRunResponse",
+        "type": "object"
+      },
       "EmergencyActionOut": {
         "properties": {
           "campaign_ids": {
@@ -1788,6 +1915,77 @@
           "action_taken"
         ],
         "title": "EvaluationOut",
+        "type": "object"
+      },
+      "ExecutionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "ExecutionRequest",
+        "type": "object"
+      },
+      "ExecutionState": {
+        "description": "The write gate (DECISIONS D-28): platform writes happen only when it is open.",
+        "properties": {
+          "execution_enabled": {
+            "description": "clients.execution_enabled (default false)",
+            "title": "Execution Enabled",
+            "type": "boolean"
+          },
+          "hard_max_mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "kill_switch": {
+            "title": "Kill Switch",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "write_gate_open": {
+            "description": "open for spend-increasing writes",
+            "title": "Write Gate Open",
+            "type": "boolean"
+          },
+          "write_gate_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Gate Reason"
+          }
+        },
+        "required": [
+          "execution_enabled",
+          "mode",
+          "hard_max_mode",
+          "kill_switch",
+          "write_gate_open"
+        ],
+        "title": "ExecutionState",
         "type": "object"
       },
       "GuardrailResultOut": {
@@ -2856,43 +3054,6 @@
         "title": "ModeResponse",
         "type": "object"
       },
-      "NotEnabledDetail": {
-        "properties": {
-          "code": {
-            "const": "not_enabled",
-            "default": "not_enabled",
-            "title": "Code",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "phase": {
-            "description": "Plan phase (\u00a723) that enables this endpoint",
-            "title": "Phase",
-            "type": "string"
-          }
-        },
-        "required": [
-          "phase",
-          "message"
-        ],
-        "title": "NotEnabledDetail",
-        "type": "object"
-      },
-      "NotEnabledResponse": {
-        "properties": {
-          "detail": {
-            "$ref": "#/components/schemas/NotEnabledDetail"
-          }
-        },
-        "required": [
-          "detail"
-        ],
-        "title": "NotEnabledResponse",
-        "type": "object"
-      },
       "OverviewResponse": {
         "properties": {
           "active_emergency_actions": {
@@ -3059,7 +3220,20 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "omit = both platforms"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "title": "PauseAllRequest",
@@ -3877,6 +4051,25 @@
         "title": "RejectRequest",
         "type": "object"
       },
+      "RestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "RestoreRequest",
+        "type": "object"
+      },
       "Risk": {
         "enum": [
           "low",
@@ -3895,6 +4088,25 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "RollbackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "RollbackRequest",
+        "type": "object"
       },
       "ScoreOut": {
         "properties": {
@@ -4338,6 +4550,16 @@
             "title": "Client Id",
             "type": "string"
           },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hard_max_mode": {
             "$ref": "#/components/schemas/Mode"
           },
@@ -4384,6 +4606,13 @@
               "$ref": "#/components/schemas/JobRequestOut"
             },
             "title": "Recent Job Requests",
+            "type": "array"
+          },
+          "recent_write_requests": {
+            "items": {
+              "$ref": "#/components/schemas/WriteRequestOut"
+            },
+            "title": "Recent Write Requests",
             "type": "array"
           },
           "server_time": {
@@ -4811,6 +5040,125 @@
           "field"
         ],
         "title": "ValueChange",
+        "type": "object"
+      },
+      "WriteRequestKind": {
+        "description": "API \u2192 engine queue for platform writes the API may not perform itself (0004).",
+        "enum": [
+          "rollback",
+          "restore",
+          "pause_all"
+        ],
+        "title": "WriteRequestKind",
+        "type": "string"
+      },
+      "WriteRequestOut": {
+        "description": "A platform write queued by the API (``write_requests`` row, migration 0004) \u2014 run by\nthe engine's executor within about a minute, never by the API (DECISIONS D-29).",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WriteRequestKind"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobRequestStatus"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "target_id",
+          "params",
+          "status",
+          "requested_by",
+          "requested_at",
+          "started_at",
+          "finished_at",
+          "result",
+          "error"
+        ],
+        "title": "WriteRequestOut",
         "type": "object"
       }
     }
@@ -5544,7 +5892,7 @@
     },
     "/api/v1/changes/{change_id}/rollback": {
       "post": {
-        "description": "Manual rollback (\u00a715). Executor path ships in Phase 3 \u2014 nothing is changed here.",
+        "description": "Queue a manual rollback (\u00a715). The engine re-reads the platform: if the state still\nequals the change's result it applies the rollback payload (guarded: steps 1\u20134, plus caps\nwhen it increases spend; write gate D-28); if someone changed it since, it creates a\n``rollback_with_state_drift`` proposal that needs approval. Poll\n``GET /write-requests/{id}``. Audited.",
         "operationId": "rollback_api_v1_changes__change_id__rollback_post",
         "parameters": [
           {
@@ -5557,11 +5905,95 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RollbackRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "not applied, or a rollback is already queued"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback",
+        "tags": [
+          "changes"
+        ]
+      }
+    },
+    "/api/v1/control/execution": {
+      "get": {
+        "description": "The write gate (DECISIONS D-28).",
+        "operationId": "get_execution_api_v1_control_execution_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Execution",
+        "tags": [
+          "ops"
+        ]
+      },
+      "post": {
+        "description": "Turn platform writes on/off (``clients.execution_enabled``, default off; D-28). The\nmaster switch for every write: approved proposals, emergency stop, pause-all, rollback,\nrestore. Turning it on does not raise the mode or ``HARD_MAX_MODE``. Audited.",
+        "operationId": "set_execution_api_v1_control_execution_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionState"
+                }
               }
             },
             "description": "Successful Response"
@@ -5575,21 +6007,11 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotEnabledResponse"
-                }
-              }
-            },
-            "description": "Not enabled in this phase"
           }
         },
-        "summary": "Rollback",
+        "summary": "Set Execution",
         "tags": [
-          "changes"
+          "ops"
         ]
       }
     },
@@ -5679,7 +6101,7 @@
     },
     "/api/v1/control/pause-all": {
       "post": {
-        "description": "Emergency pause of managed campaigns (\u00a712.4). Needs the executor's emergency path and a\nwrite credential, which are installed only after the Phase 3 gate.",
+        "description": "Queue a pause of every managed, active campaign (\u00a712.4; both platforms unless\n``platform`` is given). Runs in the engine via the executor's emergency path (privileged,\nspend-reducing: passes the kill switch) and is recorded as an ``emergency_actions`` row\nwith ``restore_policy = manual``. Nothing is written while the write gate is closed\n(``execution_enabled`` off / read_only); then pause in Ads Manager / Google Ads \u2014 native\naccount limits are the hard backstop (\u00a712.5). Audited.",
         "operationId": "pause_all_api_v1_control_pause_all_post",
         "requestBody": {
           "content": {
@@ -5692,13 +6114,18 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequestOut"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "the same request is already queued/running, or not applicable"
           },
           "422": {
             "content": {
@@ -5709,16 +6136,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotEnabledResponse"
-                }
-              }
-            },
-            "description": "Not enabled in this phase"
           }
         },
         "summary": "Pause All",
@@ -5788,7 +6205,7 @@
     },
     "/api/v1/emergency-actions/{action_id}/restore": {
       "post": {
-        "description": "Restore campaigns paused by an emergency action (\u00a712.4 step 6). Phase 3.",
+        "description": "Queue a restore of the campaigns an emergency action paused (\u00a712.4 step 6). The engine\nre-enables a campaign only if it is still PAUSED and its last ``entity_history`` row has\n``source = emergency``; requires kill switch off, mode \u2260 read_only, no monthly-cap breach\nand an open write gate. Poll ``GET /write-requests/{id}`` for the result. Audited.",
         "operationId": "restore_emergency_api_v1_emergency_actions__action_id__restore_post",
         "parameters": [
           {
@@ -5801,14 +6218,36 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RestoreRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequestOut"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "the same request is already queued/running, or not applicable"
           },
           "422": {
             "content": {
@@ -5819,16 +6258,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotEnabledResponse"
-                }
-              }
-            },
-            "description": "Not enabled in this phase"
           }
         },
         "summary": "Restore Emergency",
@@ -6031,7 +6460,7 @@
     },
     "/api/v1/jobs/{name}/run": {
       "post": {
-        "description": "Queue a manual run (\u00a717, \u00a719 ``ads run``). The API never runs jobs itself: it inserts a\n``job_requests`` row that the engine scheduler picks up within about a minute (poll it via\n``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request\nper job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a\nno-op. Nothing here writes to an ad platform.",
+        "description": "Queue a manual run (\u00a717, \u00a719 ``ads run``). The API never runs jobs itself: it inserts a\n``job_requests`` row that the engine scheduler picks up within about a minute (poll it via\n``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request\nper job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a\nno-op. Jobs that can write to a platform do so only through the executor (write gate +\nguardrail).",
         "operationId": "run_job_api_v1_jobs__name__run_post",
         "parameters": [
           {
@@ -6067,16 +6496,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotEnabledResponse"
-                }
-              }
-            },
-            "description": "Not enabled in this phase"
           }
         },
         "summary": "Run Job",
@@ -6767,7 +7186,7 @@
     },
     "/api/v1/proposals/{proposal_id}/dry-run": {
       "get": {
-        "description": "Payload that would be sent to the platform. Built by the executor (Phase 3).",
+        "description": "The writes the executor would send for this proposal (\u00a717): guardrail re-run with\n``approved=true`` on fresh DB state, then the planned ops with ``before`` as last synced.\nThe platform is not called and nothing is changed (the executor itself re-reads the\nplatform and sends a validate-only request first).",
         "operationId": "dry_run_api_v1_proposals__proposal_id__dry_run_get",
         "parameters": [
           {
@@ -6784,7 +7203,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -6798,16 +7219,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotEnabledResponse"
-                }
-              }
-            },
-            "description": "Not enabled in this phase"
           }
         },
         "summary": "Dry Run",
@@ -7034,6 +7445,97 @@
           }
         },
         "summary": "System",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/write-requests": {
+      "get": {
+        "operationId": "list_write_requests_api_v1_write_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WriteRequestOut"
+                  },
+                  "title": "Response List Write Requests Api V1 Write Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Write Requests",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/write-requests/{request_id}": {
+      "get": {
+        "operationId": "get_write_request_api_v1_write_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Write Request",
         "tags": [
           "ops"
         ]

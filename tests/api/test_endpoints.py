@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from engine.config import Settings
@@ -17,6 +17,7 @@ from engine.db.models import (
     Approval,
     AuditLog,
     Campaign,
+    ChangeLog,
     Client,
     ConfigVersion,
     JobRequest,
@@ -477,14 +478,23 @@ def test_manual_proposal(
     )
 
 
-def test_dry_run_not_enabled(client: TestClient, viewer_h: H, world: World) -> None:
+def test_dry_run(client: TestClient, viewer_h: H, world: World, seeded: Session) -> None:
     r = client.get(f"{V1}/proposals/{world.proposal_waiting}/dry-run", headers=viewer_h)
-    assert r.status_code == 501
-    assert r.json()["detail"] == {
-        "code": "not_enabled",
-        "phase": "3",
-        "message": "dry-run payloads are built by the executor, which ships in Phase 3",
-    }
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["guardrail"]["reason"] == "mode_read_only" and d["ops"] == []
+    seeded.get(Client, CID).mode = "suggest"  # type: ignore[union-attr]
+    seeded.flush()
+    d = client.get(f"{V1}/proposals/{world.proposal_waiting}/dry-run", headers=viewer_h).json()
+    assert d["guardrail"]["reason"] == "not_managed" and d["ops"] == []
+    assert d["proposal_id"] == world.proposal_waiting and d["action"] == "budget_change"
+    assert d["execution"]["execution_enabled"] is False
+    assert d["execution"]["write_gate_open"] is False
+    assert "execution disabled" in d["execution"]["write_gate_reason"]
+    assert "result" in d["guardrail"]
+    if d["guardrail"]["result"] != "block":
+        assert d["plan_error"] or [o["op"] for o in d["ops"]] == ["set_daily_budget"]
+    assert seeded.scalar(select(func.count()).select_from(ChangeLog)) == 1  # nothing written
     assert client.get(f"{V1}/proposals/999999/dry-run", headers=viewer_h).status_code == 404
 
 
@@ -510,9 +520,18 @@ def test_changes_and_evaluations(
     ev = client.get(f"{V1}/evaluations?change_id={world.change}", headers=viewer_h).json()
     assert sorted(e["horizon_days"] for e in ev) == [3, 7]
     assert client.get(f"{V1}/evaluations?open_only=true", headers=viewer_h).json() == []
-    r = client.post(f"{V1}/changes/{world.change}/rollback", headers=approver_h)
-    assert r.status_code == 501 and r.json()["detail"]["phase"] == "3"
+    assert client.post(f"{V1}/changes/{world.change}/rollback", headers=viewer_h).status_code == 403
+    r = client.post(
+        f"{V1}/changes/{world.change}/rollback", headers=approver_h, json={"reason": "test"}
+    )
+    assert r.status_code == 202, r.text
+    req = r.json()
+    assert (req["kind"], req["target_id"], req["status"]) == ("rollback", world.change, "queued")
+    dup = client.post(f"{V1}/changes/{world.change}/rollback", headers=approver_h)
+    assert dup.status_code == 409 and dup.json()["detail"]["request_id"] == req["id"]
     assert client.post(f"{V1}/changes/999999/rollback", headers=approver_h).status_code == 404
+    got = client.get(f"{V1}/write-requests/{req['id']}", headers=viewer_h).json()
+    assert got["requested_by"] == "admin"
 
 
 # --------------------------------------------------------------------------- config
@@ -614,7 +633,9 @@ def test_emergency_actions(client: TestClient, viewer_h: H, approver_h: H, world
         (world.emergency, [world.meta_campaign])
     ]
     r = client.post(f"{V1}/emergency-actions/{world.emergency}/restore", headers=approver_h)
-    assert r.status_code == 501
+    assert r.status_code == 202 and r.json()["kind"] == "restore", r.text
+    r2 = client.post(f"{V1}/emergency-actions/{world.emergency}/restore", headers=approver_h)
+    assert r2.status_code == 409
     assert (
         client.post(f"{V1}/emergency-actions/999999/restore", headers=approver_h).status_code == 404
     )
@@ -645,15 +666,39 @@ def test_kill_switch_env_override(
         assert "env KILL_SWITCH" in d["note"]
 
 
-def test_pause_all_not_enabled(
-    client: TestClient, approver_h: H, admin_h: H, seeded: Session
+def test_pause_all_is_queued(
+    client: TestClient, approver_h: H, viewer_h: H, seeded: Session
 ) -> None:
     assert client.post(f"{V1}/control/pause-all", headers=approver_h, json={}).status_code == 422
-    r = client.post(
-        f"{V1}/control/pause-all", headers=approver_h, json={"confirm": True, "platform": "meta"}
-    )
-    assert r.status_code == 501 and r.json()["detail"]["phase"] == "3"
+    body = {"confirm": True, "platform": "meta"}
+    assert client.post(f"{V1}/control/pause-all", headers=viewer_h, json=body).status_code == 403
+    r = client.post(f"{V1}/control/pause-all", headers=approver_h, json=body)
+    assert r.status_code == 202, r.text
+    assert (r.json()["kind"], r.json()["params"]["platform"]) == ("pause_all", "meta")
+    assert client.post(f"{V1}/control/pause-all", headers=approver_h, json=body).status_code == 409
+    both = {"confirm": True}
+    assert client.post(f"{V1}/control/pause-all", headers=approver_h, json=both).status_code == 202
     assert seeded.get(Client, "client_test").kill_switch is False  # type: ignore[union-attr]
+    assert len(_audit(seeded, "write.pause_all_requested")) == 2
+    rows = client.get(f"{V1}/write-requests", headers=viewer_h).json()
+    assert [x["kind"] for x in rows] == ["pause_all", "pause_all"]
+    assert client.get(f"{V1}/write-requests/999999", headers=viewer_h).status_code == 404
+
+
+def test_execution_switch(
+    client: TestClient, admin_h: H, approver_h: H, viewer_h: H, seeded: Session
+) -> None:
+    d = client.get(f"{V1}/control/execution", headers=viewer_h).json()
+    assert (d["execution_enabled"], d["write_gate_open"]) == (False, False)
+    body = {"enabled": True, "reason": "test"}
+    assert client.post(f"{V1}/control/execution", headers=approver_h, json=body).status_code == 403
+    d = client.post(f"{V1}/control/execution", headers=admin_h, json=body).json()
+    assert d["execution_enabled"] is True
+    assert d["write_gate_open"] is False and "read_only" in d["write_gate_reason"]
+    assert seeded.get(Client, "client_test").execution_enabled is True  # type: ignore[union-attr]
+    assert [(a.payload or {})["after"] for a in _audit(seeded, "control.execution")] == [True]
+    sysd = client.get(f"{V1}/system", headers=viewer_h).json()
+    assert sysd["execution"]["execution_enabled"] is True
 
 
 def test_jobs_run_queues_a_request(
@@ -661,8 +706,6 @@ def test_jobs_run_queues_a_request(
 ) -> None:
     assert client.post(f"{V1}/jobs/hourly_pull/run", headers=approver_h).status_code == 403
     assert client.post(f"{V1}/jobs/nope/run", headers=admin_h).status_code == 404
-    r = client.post(f"{V1}/jobs/emergency_restore/run", headers=admin_h)
-    assert r.status_code == 501 and r.json()["detail"]["phase"] == "3"
     assert client.post(f"{V1}/jobs/retention/run", headers=admin_h).status_code == 422
     r = client.post(f"{V1}/jobs/hourly_pull/run", headers=admin_h)
     assert r.status_code == 202, r.text
@@ -692,6 +735,10 @@ def test_system(client: TestClient, viewer_h: H, world: World) -> None:
     assert ops["google"]["limit"] == 2880 and ops["google"]["used"] is None
     assert ops["meta"]["limit"] is None
     assert "daily_pipeline" in d["manual_jobs"] and "retention" not in d["manual_jobs"]
+    assert "emergency_restore" in d["manual_jobs"] and "execute_approved" in d["manual_jobs"]
+    assert d["execution"]["execution_enabled"] is False
+    assert d["execution"]["write_gate_open"] is False
+    assert d["recent_write_requests"] == []
 
 
 def test_system_heartbeat_and_operations(

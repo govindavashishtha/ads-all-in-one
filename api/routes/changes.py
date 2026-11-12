@@ -1,20 +1,22 @@
-"""/changes and /evaluations (§17). Rollback is a Phase 3 executor feature."""
+"""/changes and /evaluations (§17). Rollback is queued for the engine executor (D-29)."""
 
 from __future__ import annotations
 
 import datetime as dt
 from collections import defaultdict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
 from api.auth.adapter import Approver, Viewer
-from api.deps import ClockDep, DbDep, SettingsDep
-from api.errors import NOT_ENABLED_RESPONSES, not_enabled, not_found
-from api.schemas import ChangeOut, EvaluationOut
+from api.deps import ClockDep, DbDep, SettingsDep, client_ip
+from api.errors import not_found
+from api.schemas import ChangeOut, EvaluationOut, RollbackRequest, WriteRequestOut
 from api.services.entities import change_log_change, resolve
+from api.services.writes import queue_write
 from api.timeutil import parse_days
 from engine.db.models import ChangeLog, Evaluation
+from engine.enums import ChangeStatus, WriteRequestKind
 
 router = APIRouter(tags=["changes"])
 
@@ -81,13 +83,45 @@ def list_changes(
     return out
 
 
-@router.post("/changes/{change_id}/rollback", responses=NOT_ENABLED_RESPONSES)
-def rollback(*, change_id: int, user: Approver, db: DbDep, settings: SettingsDep) -> None:
-    """Manual rollback (§15). Executor path ships in Phase 3 — nothing is changed here."""
+@router.post(
+    "/changes/{change_id}/rollback",
+    status_code=202,
+    response_model=WriteRequestOut,
+    responses={409: {"description": "not applied, or a rollback is already queued"}},
+)
+def rollback(
+    *,
+    change_id: int,
+    request: Request,
+    user: Approver,
+    db: DbDep,
+    settings: SettingsDep,
+    clock: ClockDep,
+    body: RollbackRequest | None = None,
+) -> WriteRequestOut:
+    """Queue a manual rollback (§15). The engine re-reads the platform: if the state still
+    equals the change's result it applies the rollback payload (guarded: steps 1–4, plus caps
+    when it increases spend; write gate D-28); if someone changed it since, it creates a
+    ``rollback_with_state_drift`` proposal that needs approval. Poll
+    ``GET /write-requests/{id}``. Audited."""
     row = db.get(ChangeLog, change_id)
     if row is None or row.client_id != settings.client_id:
         not_found("change", change_id)
-    not_enabled("3", "rollback runs through the executor, which ships in Phase 3")
+    if row.status != ChangeStatus.APPLIED.value:
+        raise HTTPException(
+            409, f"change {change_id} is {row.status}; only applied changes can be rolled back"
+        )
+    return queue_write(
+        db,
+        settings,
+        kind=WriteRequestKind.ROLLBACK,
+        dedupe_key=f"rollback:{change_id}",
+        target_id=change_id,
+        params={"reason": body.reason} if body and body.reason else None,
+        actor=user.username,
+        ip=client_ip(request),
+        now=clock(),
+    )
 
 
 @router.get("/evaluations", response_model=list[EvaluationOut])

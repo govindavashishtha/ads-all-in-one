@@ -12,11 +12,13 @@ from sqlalchemy.dialects.postgresql import distinct_on, insert
 
 from api.auth.adapter import Admin, Approver, Viewer
 from api.deps import ClockDep, DbDep, SettingsDep, client_ip, load_client
-from api.errors import NOT_ENABLED_RESPONSES, not_enabled, not_found
+from api.errors import not_found
 from api.schemas import (
     AdAccountOut,
     AlertOut,
     EmergencyActionOut,
+    ExecutionRequest,
+    ExecutionState,
     HeartbeatOut,
     JobRequestOut,
     JobRunOut,
@@ -27,27 +29,31 @@ from api.schemas import (
     ModeResponse,
     PauseAllRequest,
     PlatformOperationsOut,
+    RestoreRequest,
     SystemResponse,
+    WriteRequestOut,
 )
 from api.services.queries import audit
+from api.services.writes import execution_state, queue_write
 from engine.connectors.factory import COUNTERS
-from engine.db.models import AdAccount, Alert, Client, EmergencyAction, JobRequest, JobRun
-from engine.enums import JobRequestStatus, JobStatus, Mode, Platform, Severity
+from engine.db.models import (
+    AdAccount,
+    Alert,
+    Client,
+    EmergencyAction,
+    JobRequest,
+    JobRun,
+    WriteRequest,
+)
+from engine.enums import JobRequestStatus, JobStatus, Mode, Platform, Severity, WriteRequestKind
 from engine.jobs.manual import MANUAL_JOBS
 from engine.system_status import HEARTBEAT, get_statuses, operations_key
 
 router = APIRouter(tags=["ops"])
 
 # §9 job names. MANUAL_JOBS (engine.jobs.manual) can be queued via POST /jobs/{name}/run;
-# the others answer 501 (later phase) or 422 (operator CLI only).
-JOB_NAMES = (
-    *MANUAL_JOBS,
-    "emergency_restore",
-    "token_reset",
-    "retention",
-    "backfill",
-)
-_LATER_PHASE = {"emergency_restore": "3", "token_reset": "4"}
+# the others answer 422 (operator CLI only).
+JOB_NAMES = (*MANUAL_JOBS, "retention", "backfill")
 STALE_AFTER = dt.timedelta(hours=2)
 HEARTBEAT_HEALTHY_WITHIN = dt.timedelta(minutes=30)
 # Daily operation limit per platform as configured in the engine's connector counters
@@ -130,13 +136,47 @@ def list_emergency_actions(
     return [EmergencyActionOut.model_validate(e) for e in rows]
 
 
-@router.post("/emergency-actions/{action_id}/restore", responses=NOT_ENABLED_RESPONSES)
-def restore_emergency(*, action_id: int, user: Approver, db: DbDep, settings: SettingsDep) -> None:
-    """Restore campaigns paused by an emergency action (§12.4 step 6). Phase 3."""
+_QUEUED: dict[int | str, dict[str, Any]] = {
+    409: {"description": "the same request is already queued/running, or not applicable"},
+}
+
+
+@router.post(
+    "/emergency-actions/{action_id}/restore",
+    status_code=202,
+    response_model=WriteRequestOut,
+    responses=_QUEUED,
+)
+def restore_emergency(
+    *,
+    action_id: int,
+    request: Request,
+    user: Approver,
+    db: DbDep,
+    settings: SettingsDep,
+    clock: ClockDep,
+    body: RestoreRequest | None = None,
+) -> WriteRequestOut:
+    """Queue a restore of the campaigns an emergency action paused (§12.4 step 6). The engine
+    re-enables a campaign only if it is still PAUSED and its last ``entity_history`` row has
+    ``source = emergency``; requires kill switch off, mode ≠ read_only, no monthly-cap breach
+    and an open write gate. Poll ``GET /write-requests/{id}`` for the result. Audited."""
     e = db.get(EmergencyAction, action_id)
     if e is None or e.client_id != settings.client_id:
         not_found("emergency action", action_id)
-    not_enabled("3", "restore re-enables campaigns through the executor (Phase 3)")
+    if e.restored_at is not None:
+        raise HTTPException(409, f"emergency action {action_id} was restored at {e.restored_at}")
+    return queue_write(
+        db,
+        settings,
+        kind=WriteRequestKind.RESTORE,
+        dedupe_key=f"restore:{action_id}",
+        target_id=action_id,
+        params={"reason": body.reason} if body and body.reason else None,
+        actor=user.username,
+        ip=client_ip(request),
+        now=clock(),
+    )
 
 
 # --------------------------------------------------------------------------- control
@@ -220,18 +260,99 @@ def set_kill_switch(
     return KillSwitchResponse(**state.model_dump(), note=note)
 
 
-@router.post("/control/pause-all", responses=NOT_ENABLED_RESPONSES)
-def pause_all(*, body: PauseAllRequest, user: Approver) -> None:
-    """Emergency pause of managed campaigns (§12.4). Needs the executor's emergency path and a
-    write credential, which are installed only after the Phase 3 gate."""
+@router.post(
+    "/control/pause-all", status_code=202, response_model=WriteRequestOut, responses=_QUEUED
+)
+def pause_all(
+    *,
+    body: PauseAllRequest,
+    request: Request,
+    user: Approver,
+    db: DbDep,
+    settings: SettingsDep,
+    clock: ClockDep,
+) -> WriteRequestOut:
+    """Queue a pause of every managed, active campaign (§12.4; both platforms unless
+    ``platform`` is given). Runs in the engine via the executor's emergency path (privileged,
+    spend-reducing: passes the kill switch) and is recorded as an ``emergency_actions`` row
+    with ``restore_policy = manual``. Nothing is written while the write gate is closed
+    (``execution_enabled`` off / read_only); then pause in Ads Manager / Google Ads — native
+    account limits are the hard backstop (§12.5). Audited."""
     if not body.confirm:
         raise HTTPException(422, "pause-all requires confirm=true")
-    not_enabled(
-        "3",
-        "pause-all needs the executor emergency path + write credentials (Phase 3 gate). "
-        "Until then pause campaigns in Ads Manager / Google Ads; native account limits are "
-        "the hard backstop (§12.5).",
+    scope = body.platform.value if body.platform else "all"
+    return queue_write(
+        db,
+        settings,
+        kind=WriteRequestKind.PAUSE_ALL,
+        dedupe_key=f"pause_all:{scope}",
+        target_id=None,
+        params={"platform": body.platform.value if body.platform else None, "reason": body.reason},
+        actor=user.username,
+        ip=client_ip(request),
+        now=clock(),
     )
+
+
+@router.get("/control/execution", response_model=ExecutionState)
+def get_execution(*, user: Viewer, db: DbDep, settings: SettingsDep) -> ExecutionState:
+    """The write gate (DECISIONS D-28)."""
+    return execution_state(db, settings)
+
+
+@router.post("/control/execution", response_model=ExecutionState)
+def set_execution(
+    *,
+    body: ExecutionRequest,
+    request: Request,
+    user: Admin,
+    db: DbDep,
+    settings: SettingsDep,
+    clock: ClockDep,
+) -> ExecutionState:
+    """Turn platform writes on/off (``clients.execution_enabled``, default off; D-28). The
+    master switch for every write: approved proposals, emergency stop, pause-all, rollback,
+    restore. Turning it on does not raise the mode or ``HARD_MAX_MODE``. Audited."""
+    client = load_client(db, settings)
+    before = client.execution_enabled
+    now = clock()
+    client.execution_enabled = body.enabled
+    client.updated_at = now
+    audit(
+        db,
+        client_id=client.client_id,
+        actor=user.username,
+        action="control.execution",
+        target=f"client:{client.client_id}",
+        payload={"before": before, "after": body.enabled, "reason": body.reason},
+        ip=client_ip(request),
+        at=now,
+    )
+    db.commit()
+    return execution_state(db, settings)
+
+
+@router.get("/write-requests", response_model=list[WriteRequestOut])
+def list_write_requests(
+    *, user: Viewer, db: DbDep, settings: SettingsDep, limit: int = Query(50, ge=1, le=500)
+) -> list[WriteRequestOut]:
+    rows = db.scalars(
+        select(WriteRequest)
+        .where(WriteRequest.client_id == settings.client_id)
+        .order_by(WriteRequest.requested_at.desc(), WriteRequest.id.desc())
+        .limit(limit)
+    ).all()
+    return [WriteRequestOut.model_validate(r) for r in rows]
+
+
+@router.get("/write-requests/{request_id}", response_model=WriteRequestOut)
+def get_write_request(
+    *, request_id: int, user: Viewer, db: DbDep, settings: SettingsDep
+) -> WriteRequestOut:
+    r = db.get(WriteRequest, request_id)
+    if r is None or r.client_id != settings.client_id:
+        not_found("write request", request_id)
+    return WriteRequestOut.model_validate(r)
 
 
 # --------------------------------------------------------------------------- jobs
@@ -241,10 +362,7 @@ def pause_all(*, body: PauseAllRequest, user: Approver) -> None:
     "/jobs/{name}/run",
     status_code=202,
     response_model=JobRequestOut,
-    responses={
-        **NOT_ENABLED_RESPONSES,
-        409: {"description": "a request for this job is already queued or running"},
-    },
+    responses={409: {"description": "a request for this job is already queued or running"}},
 )
 def run_job(
     *,
@@ -259,11 +377,10 @@ def run_job(
     ``job_requests`` row that the engine scheduler picks up within about a minute (poll it via
     ``GET /jobs/requests/{id}``). Only ``MANUAL_JOBS`` are accepted; at most one open request
     per job. Jobs keep their own locks and per-window idempotency, so a duplicate run is a
-    no-op. Nothing here writes to an ad platform."""
+    no-op. Jobs that can write to a platform do so only through the executor (write gate +
+    guardrail)."""
     if name not in JOB_NAMES:
         raise HTTPException(404, f"unknown job {name!r}; known: {', '.join(JOB_NAMES)}")
-    if name in _LATER_PHASE:
-        not_enabled(_LATER_PHASE[name], f"job {name!r} ships in Phase {_LATER_PHASE[name]}")
     if name not in MANUAL_JOBS:
         raise HTTPException(
             422,
@@ -402,6 +519,16 @@ def system(*, user: Viewer, db: DbDep, settings: SettingsDep, clock: ClockDep) -
                 select(JobRequest)
                 .where(JobRequest.client_id == client.client_id)
                 .order_by(JobRequest.requested_at.desc(), JobRequest.id.desc())
+                .limit(10)
+            )
+        ],
+        execution=execution_state(db, settings),
+        recent_write_requests=[
+            WriteRequestOut.model_validate(r)
+            for r in db.scalars(
+                select(WriteRequest)
+                .where(WriteRequest.client_id == client.client_id)
+                .order_by(WriteRequest.requested_at.desc(), WriteRequest.id.desc())
                 .limit(10)
             )
         ],

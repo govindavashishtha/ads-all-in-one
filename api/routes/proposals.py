@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from api.auth.adapter import Admin, Approver, User, Viewer
 from api.deps import ClockDep, DbDep, SettingsDep, client_ip, load_client
-from api.errors import NOT_ENABLED_RESPONSES, not_enabled, not_found
+from api.errors import not_found
 from api.schemas import (
     ApprovalOut,
     ApproveRequest,
@@ -23,11 +23,12 @@ from api.schemas import (
     BatchDecisionResponse,
     DecisionResponse,
     DecisionResult,
+    DryRunResponse,
     ManualProposalRequest,
     ProposalOut,
     RejectRequest,
 )
-from api.services import approvals
+from api.services import approvals, writes
 from api.services.entities import parse_guardrail, parse_triage, proposal_change, resolve
 from api.services.queries import audit
 from engine.db.models import Ad, AdGroup, Campaign, Keyword, Proposal
@@ -247,13 +248,18 @@ def reject(
     return DecisionResponse(proposal=_out(db, p), next_step=approvals.NEXT_STEP_REJECTED)
 
 
-@router.get("/{proposal_id}/dry-run", responses=NOT_ENABLED_RESPONSES)
-def dry_run(*, proposal_id: int, user: Viewer, db: DbDep, settings: SettingsDep) -> None:
-    """Payload that would be sent to the platform. Built by the executor (Phase 3)."""
+@router.get("/{proposal_id}/dry-run", response_model=DryRunResponse)
+def dry_run(
+    *, proposal_id: int, user: Viewer, db: DbDep, settings: SettingsDep, clock: ClockDep
+) -> DryRunResponse:
+    """The writes the executor would send for this proposal (§17): guardrail re-run with
+    ``approved=true`` on fresh DB state, then the planned ops with ``before`` as last synced.
+    The platform is not called and nothing is changed (the executor itself re-reads the
+    platform and sends a validate-only request first)."""
     p = db.get(Proposal, proposal_id)
     if p is None or p.client_id != settings.client_id:
         not_found("proposal", proposal_id)
-    not_enabled("3", "dry-run payloads are built by the executor, which ships in Phase 3")
+    return writes.dry_run(db, settings, p, clock())
 
 
 # One definition for every producer (engine.proposals); re-exported for existing callers.

@@ -26,6 +26,7 @@ from engine.enums import (
     Platform,
     Risk,
     Role,
+    WriteRequestKind,
 )
 from engine.guardrails.check import BlockReason
 
@@ -705,8 +706,78 @@ class KillSwitchResponse(KillSwitchState):
 
 
 class PauseAllRequest(_In):
-    platform: Platform | None = None
+    platform: Platform | None = Field(default=None, description="omit = both platforms")
     confirm: bool = False
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class RollbackRequest(_In):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class RestoreRequest(_In):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class WriteRequestOut(_Out):
+    """A platform write queued by the API (``write_requests`` row, migration 0004) — run by
+    the engine's executor within about a minute, never by the API (DECISIONS D-29)."""
+
+    id: int
+    kind: WriteRequestKind
+    target_id: int | None
+    params: dict[str, Any] | None
+    status: JobRequestStatus
+    requested_by: str
+    requested_at: dt.datetime
+    started_at: dt.datetime | None
+    finished_at: dt.datetime | None
+    result: dict[str, Any] | None
+    error: str | None
+
+
+class ExecutionRequest(_In):
+    enabled: bool
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ExecutionState(_Out):
+    """The write gate (DECISIONS D-28): platform writes happen only when it is open."""
+
+    execution_enabled: bool = Field(description="clients.execution_enabled (default false)")
+    mode: Mode
+    hard_max_mode: Mode
+    kill_switch: bool
+    write_gate_open: bool = Field(description="open for spend-increasing writes")
+    write_gate_reason: str | None = None
+
+
+class DryRunOp(_Out):
+    op: str
+    platform: Platform
+    entity_type: EntityType
+    external_id: str
+    before: dict[str, Any] | None = Field(description="as last synced (not read live)")
+    intended: dict[str, Any]
+    args: dict[str, Any]
+    would_change: bool
+
+
+class DryRunResponse(_Out):
+    """What the executor would send (§17 dry-run). Built from DB state; the platform is not
+    called and nothing is changed."""
+
+    proposal_id: int
+    action: str
+    status: str
+    guardrail: dict[str, Any] = Field(description="guardrail re-run now with approved=true")
+    new_daily_budget: Decimal | None = None
+    ops: list[DryRunOp] = Field(default_factory=list)
+    plan_error: str | None = None
+    execution: ExecutionState
+    validate_only: bool = Field(
+        True, description="the executor also sends a validate-only request before applying"
+    )
 
 
 class JobRunOut(_Out):
@@ -790,6 +861,8 @@ class SystemResponse(_Out):
     platform_operations: list[PlatformOperationsOut]
     manual_jobs: list[str] = Field(description="job names accepted by POST /jobs/{name}/run")
     recent_job_requests: list[JobRequestOut] = Field(default_factory=list)
+    execution: ExecutionState | None = None
+    recent_write_requests: list[WriteRequestOut] = Field(default_factory=list)
 
 
 # Resolve forward references (models above refer to ones defined later in this module).

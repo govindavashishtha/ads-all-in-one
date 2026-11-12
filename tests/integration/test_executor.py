@@ -386,3 +386,28 @@ def test_increasing_rollback_respects_caps(world: World) -> None:
     world.ex("UPDATE campaigns SET daily_budget=11000 WHERE id=:i", i=world.ids["C3"])
     rb = rollback_change(world.env(), change_id, requested_by="test")
     assert rb.status == "blocked" and "cap_exceeded" in (rb.detail or "")
+
+
+# ----------------------------------------------------------------------------- dry-run
+
+
+def test_dry_run_plans_without_calling_the_platform(world: World) -> None:
+    from api.services.writes import dry_run
+    from engine.db.models import Proposal
+
+    pid = world.proposal("C1", Action.BUDGET_CHANGE, params={"change_pct": -15})
+    pause = world.proposal("AD1", Action.PAUSE, rule_key="pause_loser")
+    with world.sessions() as s:
+        row, row2 = s.get(Proposal, pid), s.get(Proposal, pause)
+        assert row is not None and row2 is not None
+        d = dry_run(s, world.settings, row, world.clock())
+        p2 = dry_run(s, world.settings, row2, world.clock())
+    assert d.guardrail["result"] != "block", d.guardrail
+    [op] = d.ops
+    assert op.op == "set_daily_budget" and op.would_change
+    assert op.intended["daily_budget"] == str(d.new_daily_budget)
+    assert op.before is not None and op.before["status"] == "active"
+    assert [o.op for o in p2.ops] == ["set_status"] and p2.ops[0].intended["status"] == "paused"
+    assert d.execution.write_gate_open is True
+    assert world.meta.calls == [] and world.google.calls == []
+    assert world.one("SELECT count(*) FROM change_log WHERE client_id=:c") == 0
